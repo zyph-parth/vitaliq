@@ -1,0 +1,250 @@
+// VitalIQ — Full Prisma Schema
+// Covers all 5 pillars: Training, Nutrition, Sleep, Mental, Longevity
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Run: npm run db:seed
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── USER ───────────────────────────────────────────────────────────────────
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String
+  passwordHash  String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Body metrics
+  age           Int
+  sex           String   // "male" | "female"
+  heightCm      Float
+  weightKg      Float
+  activityLevel String   // sedentary | light | moderate | active | athlete
+  goal          String   // lose | muscle | maintain | longevity
+
+  // Calculated (stored for perf)
+  bmi           Float
+  bmr           Float
+  tdee          Float
+  bodyFatPct    Float?
+
+  // Relations
+  weightLogs    WeightLog[]
+  mealLogs      MealLog[]
+  workoutSessions WorkoutSession[]
+  sleepLogs     SleepLog[]
+  moodLogs      MoodLog[]
+  biomarkers    Biomarker[]
+  insights      Insight[]
+  badges        UserBadge[]
+  streak        Streak?
+
+  @@map("users")
+}
+
+// ─── WEIGHT TRACKING ────────────────────────────────────────────────────────
+model WeightLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date       DateTime @default(now())
+  weightKg   Float
+  bodyFatPct Float?
+  notes      String?
+
+  @@map("weight_logs")
+  @@index([userId, date])
+}
+
+// ─── NUTRITION ───────────────────────────────────────────────────────────────
+model MealLog {
+  id          String   @id @default(cuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loggedAt    DateTime @default(now())
+  mealType    String   // breakfast | lunch | dinner | snack | pre_workout | post_workout
+  description String   // raw text input
+  
+  // Gemini AI parsed macros
+  calories    Int
+  proteinG    Float
+  carbsG      Float
+  fatG        Float
+  fibreG      Float
+  sugarG      Float?
+  sodiumMg    Float?
+  
+  // AI extras
+  ingredients Json?    // array of detected ingredients
+  aiInsight   String?  // one-line AI insight
+  photoUrl    String?  // for future photo logging
+
+  @@map("meal_logs")
+  @@index([userId, loggedAt])
+}
+
+// ─── TRAINING ────────────────────────────────────────────────────────────────
+model WorkoutSession {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  startedAt    DateTime   @default(now())
+  completedAt  DateTime?
+  
+  sessionType  String     // push | pull | legs | full_body | cardio | hiit | yoga | rest
+  title        String
+  aiGenerated  Boolean    @default(true)
+  totalVolume  Float?     // kg lifted
+  caloriesBurned Int?
+  durationMins Int?
+  notes        String?
+
+  exercises    ExerciseLog[]
+
+  @@map("workout_sessions")
+  @@index([userId, startedAt])
+}
+
+model ExerciseLog {
+  id          String         @id @default(cuid())
+  sessionId   String
+  session     WorkoutSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  name        String
+  orderIndex  Int
+  sets        ExerciseSet[]
+  notes       String?
+
+  @@map("exercise_logs")
+}
+
+model ExerciseSet {
+  id          String      @id @default(cuid())
+  exerciseId  String
+  exercise    ExerciseLog @relation(fields: [exerciseId], references: [id], onDelete: Cascade)
+  
+  setNumber   Int
+  reps        Int?
+  weightKg    Float?
+  durationSec Int?        // for time-based exercises
+  rpe         Int?        // Rate of Perceived Exertion 1-10
+  completed   Boolean     @default(false)
+
+  @@map("exercise_sets")
+}
+
+// ─── SLEEP ───────────────────────────────────────────────────────────────────
+model SleepLog {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date         DateTime // the date this sleep belongs to
+  
+  bedtimeAt    DateTime
+  wakeAt       DateTime
+  totalHours   Float
+  deepHours    Float?
+  remHours     Float?
+  lightHours   Float?
+  
+  hrv          Float?   // Heart rate variability (ms)
+  restingHR    Int?     // beats per minute
+  quality      Int      // 1-10 user rating
+  sleepDebt    Float?   // calculated accumulated debt (hours)
+  
+  // Source: manual | apple_health | oura | garmin | whoop
+  source       String   @default("manual")
+  notes        String?
+
+  @@map("sleep_logs")
+  @@index([userId, date])
+}
+
+// ─── MENTAL LOAD ─────────────────────────────────────────────────────────────
+model MoodLog {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  loggedAt     DateTime @default(now())
+  
+  mood         Int      // 1-10
+  energy       Int      // 1-10
+  stress       Int      // 1-10
+  focus        Int      // 1-10
+  notes        String?
+  
+  // Triggers (optional multi-select)
+  triggers     String[] // work | sleep | diet | exercise | social | other
+
+  @@map("mood_logs")
+  @@index([userId, loggedAt])
+}
+
+// ─── BIOMARKERS (Longevity Pillar) ───────────────────────────────────────────
+model Biomarker {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recordedAt   DateTime @default(now())
+  
+  type         String   // glucose | cholesterol_total | ldl | hdl | triglycerides | vitamin_d | ferritin | creatinine | vo2max | biological_age
+  value        Float
+  unit         String
+  source       String   @default("manual") // manual | lab_pdf | wearable
+  notes        String?
+
+  @@map("biomarkers")
+  @@index([userId, type, recordedAt])
+}
+
+// ─── AI INSIGHTS ─────────────────────────────────────────────────────────────
+model Insight {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generatedAt  DateTime @default(now())
+  
+  type         String   // daily_readiness | cross_pillar | nutrition | training | sleep | longevity
+  readinessScore Int?   // 0-100
+  headline     String
+  body         String
+  actionable   String?  // specific thing user can do today
+  pillarsUsed  String[] // which data was used to generate this
+  dismissed    Boolean  @default(false)
+
+  @@map("insights")
+  @@index([userId, generatedAt])
+}
+
+// ─── STREAKS & GAMIFICATION ──────────────────────────────────────────────────
+model Streak {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  currentDays  Int      @default(0)
+  bestDays     Int      @default(0)
+  lastLogDate  DateTime?
+  updatedAt    DateTime @updatedAt
+
+  @@map("streaks")
+}
+
+model UserBadge {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  badgeId      String   // e.g. "streak_10" | "first_pr" | "macro_master"
+  earnedAt     DateTime @default(now())
+
+  @@unique([userId, badgeId])
+  @@map("user_badges")
+}

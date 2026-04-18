@@ -1,0 +1,40 @@
+{
+  "name": "vitaliq",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "db:push": "node scripts/db-runner.cjs push",
+    "db:seed": "node scripts/db-runner.cjs seed",
+    "db:setup": "node scripts/db-runner.cjs setup",
+    "db:studio": "prisma studio",
+    "db:reset": "node scripts/db-runner.cjs reset"
+  },
+  "dependencies": {
+    "next": "14.2.3",
+    "react": "^18",
+    "react-dom": "^18",
+    "@prisma/client": "^5.12.0",
+    "next-auth": "^4.24.7",
+    "bcryptjs": "^2.4.3",
+    "recharts": "^2.12.4",
+    "zustand": "^4.5.2",
+    "date-fns": "^3.6.0",
+    "clsx": "^2.1.1"
+  },
+  "devDependencies": {
+    "prisma": "^5.12.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5",
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/bcryptjs": "^2.4.6",
+    "tailwindcss": "^3.4.3",
+    "autoprefixer": "^10.0.1",
+    "postcss": "^8"
+  }
+}
