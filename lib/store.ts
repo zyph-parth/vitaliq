@@ -18,6 +18,28 @@ export interface UserProfile {
   bodyFatPct?: number
 }
 
+export interface ActiveSession {
+  id: string
+  title: string
+  sessionType: string
+  durationMins: number | null
+  caloriesBurned: number | null
+  exercises: Array<{
+    id: string
+    name: string
+    orderIndex: number
+    notes: string | null
+    sets: Array<{
+      id: string
+      setNumber: number
+      reps: number | null
+      weightKg: number | null
+      durationSec: number | null
+      completed: boolean
+    }>
+  }>
+}
+
 // CODE QUALITY 3: Proper types replacing `any`
 export interface NutritionToday {
   calories: number
@@ -111,10 +133,11 @@ interface AppState {
   addMeal: (meal: AppState['meals'][0]) => void
 
   // Workout
-  activeSession: Record<string, unknown> | null
-  setActiveSession: (session: Record<string, unknown> | null) => void
+  activeSession: ActiveSession | null
+  setActiveSession: (session: ActiveSession | null) => void
   completedSets: Record<string, boolean>  // setId → completed
   toggleSet: (setId: string) => void
+  clearCompletedSets: () => void
 
   // Coach
   chatHistory: Array<{ role: 'user' | 'ai'; content: string; time: string }>
@@ -185,6 +208,7 @@ export const useStore = create<AppState>()(
         set((s) => ({
           completedSets: { ...s.completedSets, [setId]: !s.completedSets[setId] },
         })),
+      clearCompletedSets: () => set({ completedSets: {} }),
 
       // Coach
       chatHistory: [],

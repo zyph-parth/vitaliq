@@ -4,6 +4,8 @@ import { getServerSession } from 'next-auth'
 import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
 import { updateStreak } from '@/lib/streak'
+import { computeMacroTargets } from '@/lib/calculations'
+import { getDayBounds } from '@/lib/dates'
 
 // GET — fetch today's meals
 export async function GET(req: NextRequest) {
@@ -15,10 +17,8 @@ export async function GET(req: NextRequest) {
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
+  const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+  const { today, tomorrow } = getDayBounds(tz)
 
   const meals = await prisma.mealLog.findMany({
     where: {
@@ -36,13 +36,8 @@ export async function GET(req: NextRequest) {
     fibre: acc.fibre + m.fibreG,
   }), { calories: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 })
 
-  // ── HIGH 5: LBM-based protein target (matches dashboard) ─────────────────
-  const bodyFatFraction = user.bodyFatPct ? user.bodyFatPct / 100 : (user.sex === 'male' ? 0.18 : 0.25)
-  const leanMassKg = user.weightKg * (1 - bodyFatFraction)
-  const proteinTarget = Math.round(leanMassKg * 1.8)
-  const fatTarget = Math.round((user.tdee * 0.28) / 9)
-  const carbTarget = Math.max(0, Math.round((user.tdee - proteinTarget * 4 - fatTarget * 9) / 4))
-  const fibreTarget = user.sex === 'male' ? 38 : 25
+  // LBM-based macro targets — shared with dashboard route
+  const { protein: proteinTarget, fat: fatTarget, carbs: carbTarget, fibre: fibreTarget } = computeMacroTargets(user)
 
   return NextResponse.json({
     meals,

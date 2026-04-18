@@ -6,30 +6,21 @@ import { authOptions } from '@/lib/auth'
 // ── Model candidates with sane defaults ─────────────────────────────────────
 const DEFAULT_GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash']
 
-// ── Per-user in-memory rate limiter (max 20 req/min per user) ───────────────
-// ⚠ In-memory — resets on server restart. Acceptable for hackathon/demo.
-// Production: replace with Redis INCR + EXPIRE.
-const rateLimitMap = new Map<string, { count: number; windowStart: number }>()
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
 
-function checkRateLimit(userId: string): boolean {
-  const now = Date.now()
-  const entry = rateLimitMap.get(userId)
+// ── Upstash Redis sliding-window rate limiter (20 req/min per user) ─────────
+// Durable across serverless cold starts; no GC needed.
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(20, '1 m'),
+  prefix: 'vitaliq:gemini',
+})
 
-  if (!entry || now - entry.windowStart > 60_000) {
-    rateLimitMap.set(userId, { count: 1, windowStart: now })
-    return true
-  }
-  entry.count += 1
-  return entry.count <= 20
+async function checkRateLimit(userId: string): Promise<boolean> {
+  const { success } = await ratelimit.limit(userId)
+  return success
 }
-
-// ── Stale entry GC — runs every 5 min to prevent memory bloat ───────────────
-setInterval(() => {
-  const threshold = Date.now() - 70_000
-  for (const [id, entry] of rateLimitMap) {
-    if (entry.windowStart < threshold) rateLimitMap.delete(id)
-  }
-}, 5 * 60 * 1000)
 
 function getKey(): string {
   const key = process.env.GEMINI_API_KEY
@@ -159,7 +150,7 @@ export async function POST(req: NextRequest) {
     }
 
     // ── Rate limiting ─────────────────────────────────────────────────────────
-    if (!checkRateLimit(session.user.id)) {
+    if (!(await checkRateLimit(session.user.id))) {
       return NextResponse.json(
         { error: 'Too many requests. Please wait a minute and try again.' },
         {

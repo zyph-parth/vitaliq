@@ -1,0 +1,3 @@
+-- This is a Prisma migrations lock file, do not modify
+-- It is used internally by Prisma's migration engine
+provider = "postgresql"

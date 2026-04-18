@@ -28,6 +28,18 @@ export async function PATCH(req: NextRequest) {
   if (activityLevel !== undefined) updateData.activityLevel = activityLevel
   if (goal !== undefined) updateData.goal = goal
 
+  // Validate enum fields
+  const VALID_SEX = new Set(['male', 'female'])
+  const VALID_ACTIVITY = new Set(['sedentary', 'light', 'moderate', 'active', 'athlete'])
+  const VALID_GOAL = new Set(['lose', 'muscle', 'maintain', 'longevity'])
+
+  if (updateData.sex && !VALID_SEX.has(updateData.sex as string))
+    return NextResponse.json({ error: 'Invalid sex value' }, { status: 400 })
+  if (updateData.activityLevel && !VALID_ACTIVITY.has(updateData.activityLevel as string))
+    return NextResponse.json({ error: 'Invalid activity level' }, { status: 400 })
+  if (updateData.goal && !VALID_GOAL.has(updateData.goal as string))
+    return NextResponse.json({ error: 'Invalid goal value' }, { status: 400 })
+
   // Validate numeric fields
   if (updateData.age !== undefined && (isNaN(updateData.age as number) || (updateData.age as number) < 10 || (updateData.age as number) > 120)) {
     return NextResponse.json({ error: 'age must be between 10 and 120' }, { status: 400 })

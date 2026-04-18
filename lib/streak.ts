@@ -49,13 +49,15 @@ export async function updateStreak(userId: string): Promise<void> {
     { days: 100, badgeId: 'century' },
   ]
 
-  for (const { days, badgeId } of milestones) {
-    if (newCurrent >= days) {
-      await prisma.userBadge.upsert({
-        where: { userId_badgeId: { userId, badgeId } },
-        create: { userId, badgeId },
-        update: {}, // no-op if already exists
-      })
-    }
-  }
+  await Promise.all(
+    milestones
+      .filter(({ days }) => newCurrent >= days)
+      .map(({ badgeId }) =>
+        prisma.userBadge.upsert({
+          where: { userId_badgeId: { userId, badgeId } },
+          create: { userId, badgeId },
+          update: {}, // no-op if already exists
+        })
+      )
+  )
 }

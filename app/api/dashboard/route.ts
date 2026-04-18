@@ -4,8 +4,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { prisma } from '@/lib/prisma'
-import { computeReadinessScore, getStreakMessage } from '@/lib/calculations'
+import { computeReadinessScore, getStreakMessage, computeMacroTargets } from '@/lib/calculations'
 import { authOptions } from '@/lib/auth'
+import { getDayBounds } from '@/lib/dates'
 
 // MEDIUM 1 — Realistic intensity map per session type
 const SESSION_INTENSITY: Record<string, number> = {
@@ -34,12 +35,10 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+  const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+  const { today, tomorrow } = getDayBounds(tz)
   const sevenDaysAgo = new Date(today)
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
 
   // ── FETCH ALL PILLAR DATA IN PARALLEL ──────────────────────────────────
   const [
@@ -143,11 +142,9 @@ export async function GET(req: NextRequest) {
   }
 
   // Protein tracking — use lean body mass estimate for target
-  const bodyFatFraction = user.bodyFatPct ? user.bodyFatPct / 100 : (user.sex === 'male' ? 0.18 : 0.25)
-  const leanMassKg = user.weightKg * (1 - bodyFatFraction)
-  const proteinTarget = Math.round(leanMassKg * 1.8)
-  if (nutritionToday.protein > 0 && nutritionToday.protein < proteinTarget * 0.7) {
-    insights.push(`You're tracking ${Math.round(nutritionToday.protein)}g protein vs your ${proteinTarget}g target. Add a protein source to your next meal.`)
+  const macroTargets = computeMacroTargets(user)
+  if (nutritionToday.protein > 0 && nutritionToday.protein < macroTargets.protein * 0.7) {
+    insights.push(`You're tracking ${Math.round(nutritionToday.protein)}g protein vs your ${macroTargets.protein}g target. Add a protein source to your next meal.`)
   }
 
   // Calorie deficit warning
@@ -156,16 +153,13 @@ export async function GET(req: NextRequest) {
     insights.push(`You've been significantly under your calorie target for ${consecutiveLowDays} days. This can slow recovery and metabolism.`)
   }
 
-  // ── PERSIST INSIGHTS TO DB (wire Insight model) ─────────────────────────
-  // Delete today's existing insights first to avoid duplicates on repeated loads
-  await prisma.insight.deleteMany({
-    where: {
-      userId: user.id,
-      generatedAt: { gte: today, lt: tomorrow },
-    },
-  }).catch(() => {}) // non-critical, don't fail the response
+  // ── PERSIST INSIGHTS TO DB ──────────────────────────────────────────────
+  // Only write once per day — skip if insights already exist for today
+  const existingCount = await prisma.insight.count({
+    where: { userId: user.id, generatedAt: { gte: today, lt: tomorrow } },
+  })
 
-  if (insights.length > 0) {
+  if (existingCount === 0 && insights.length > 0) {
     await prisma.insight.createMany({
       data: insights.slice(0, 2).map(text => ({
         userId: user.id,
@@ -188,10 +182,7 @@ export async function GET(req: NextRequest) {
   }
 
   // ── MACRO TARGETS ───────────────────────────────────────────────────────
-  const proteinTargetG = proteinTarget  // LBM-based
-  const fatTargetG = Math.round((user.tdee * 0.28) / 9)
-  const carbTargetG = Math.max(0, Math.round((user.tdee - proteinTargetG * 4 - fatTargetG * 9) / 4))
-  const fibreTargetG = user.sex === 'male' ? 38 : 25
+  const { protein: proteinTargetG, fat: fatTargetG, carbs: carbTargetG, fibre: fibreTargetG } = macroTargets
 
   return NextResponse.json({
     user: {

@@ -242,3 +242,21 @@ export function getStreakMessage(days: number): string {
   if (days < 30) return `${days} days. Impressive consistency!`
   return `${days} days. You're in elite territory. 🏆`
 }
+
+// Shared LBM-based macro target calculation — used by dashboard and meals routes
+export function computeMacroTargets(user: {
+  weightKg: number
+  bodyFatPct: number | null
+  sex: string
+  tdee: number
+}) {
+  const bodyFatFraction = user.bodyFatPct
+    ? user.bodyFatPct / 100
+    : user.sex === 'male' ? 0.18 : 0.25
+  const leanMassKg = user.weightKg * (1 - bodyFatFraction)
+  const protein = Math.round(leanMassKg * 1.8)
+  const fat = Math.round((user.tdee * 0.28) / 9)
+  const carbs = Math.max(0, Math.round((user.tdee - protein * 4 - fat * 9) / 4))
+  const fibre = user.sex === 'male' ? 38 : 25
+  return { protein, fat, carbs, fibre }
+}
