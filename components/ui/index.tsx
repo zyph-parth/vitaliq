@@ -507,11 +507,13 @@ export function SectionHeader({
   title,
   action,
   onAction,
+  actionDisabled = false,
   className,
 }: {
   title: string
   action?: string
   onAction?: () => void
+  actionDisabled?: boolean
   className?: string
 }) {
   return (
@@ -520,7 +522,8 @@ export function SectionHeader({
       {action && (
         <button
           onClick={onAction}
-          className="text-xs font-medium text-[#8A8A85] transition-colors hover:text-[#1A1A1A]"
+          disabled={actionDisabled}
+          className="text-xs font-medium text-[#8A8A85] transition-colors hover:text-[#1A1A1A] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-[#8A8A85]"
         >
           {action}
         </button>

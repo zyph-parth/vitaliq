@@ -47,9 +47,27 @@ export async function POST(req: NextRequest) {
   if (!bedtimeAt || !wakeAt) {
     return NextResponse.json({ error: 'bedtimeAt and wakeAt are required' }, { status: 400 })
   }
+
+  const bedtimeDate = new Date(bedtimeAt)
+  const wakeDate = new Date(wakeAt)
+  if (Number.isNaN(bedtimeDate.getTime()) || Number.isNaN(wakeDate.getTime())) {
+    return NextResponse.json({ error: 'bedtimeAt and wakeAt must be valid dates' }, { status: 400 })
+  }
+
+  const derivedHours = (wakeDate.getTime() - bedtimeDate.getTime()) / 3_600_000
+  if (derivedHours <= 0 || derivedHours > 24) {
+    return NextResponse.json({ error: 'wakeAt must be after bedtimeAt and within 24 hours' }, { status: 400 })
+  }
+
   const parsedTotalHours = parseFloat(totalHours)
   if (isNaN(parsedTotalHours) || parsedTotalHours <= 0 || parsedTotalHours > 24) {
     return NextResponse.json({ error: 'totalHours must be a number between 0 and 24' }, { status: 400 })
+  }
+  if (Math.abs(parsedTotalHours - derivedHours) > 1) {
+    return NextResponse.json(
+      { error: 'totalHours must closely match the bedtimeAt/wakeAt duration' },
+      { status: 400 }
+    )
   }
   const parsedQuality = parseInt(quality)
   if (isNaN(parsedQuality) || parsedQuality < 1 || parsedQuality > 10) {
@@ -60,9 +78,9 @@ export async function POST(req: NextRequest) {
     data: {
       userId,
       date: date ? new Date(date) : new Date(),
-      bedtimeAt: new Date(bedtimeAt),
-      wakeAt: new Date(wakeAt),
-      totalHours: parsedTotalHours,
+      bedtimeAt: bedtimeDate,
+      wakeAt: wakeDate,
+      totalHours: Number(derivedHours.toFixed(2)),
       deepHours: deepHours != null ? parseFloat(deepHours) : null,
       remHours: remHours != null ? parseFloat(remHours) : null,
       lightHours: lightHours != null ? parseFloat(lightHours) : null,
@@ -75,7 +93,8 @@ export async function POST(req: NextRequest) {
   })
 
   // Update streak after successful sleep log
-  await updateStreak(userId).catch(() => {})
+  const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+  await updateStreak(userId, tz).catch(() => {})
 
   return NextResponse.json({ log }, { status: 201 })
 }

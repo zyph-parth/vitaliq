@@ -2,7 +2,7 @@
 // app/login/page.tsx — Premium light theme
 
 import { useState, useEffect } from 'react'
-import { signIn } from 'next-auth/react'
+import { signIn, useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 
 const HERO_STATS = [
@@ -20,6 +20,7 @@ const FEATURES = [
 ]
 
 export default function LoginPage() {
+  const { status } = useSession()
   const router = useRouter()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -28,6 +29,12 @@ export default function LoginPage() {
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      router.replace('/dashboard')
+    }
+  }, [status, router])
 
   const handleLogin = async (e?: React.FormEvent) => {
     if (e) e.preventDefault()
@@ -38,6 +45,8 @@ export default function LoginPage() {
     if (result?.error) { setError('Incorrect email or password. Try again.'); setLoading(false); return }
     router.push('/dashboard')
   }
+
+  if (status === 'authenticated') return null
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[linear-gradient(145deg,#eef6ff_0%,#fafaf7_38%,#effaf3_100%)]">

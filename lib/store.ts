@@ -118,8 +118,10 @@ interface AppState {
   // Dashboard
   dashboard: DashboardData | null
   dashboardLoading: boolean
+  dashboardError: string | null
   setDashboard: (data: DashboardData) => void
   setDashboardLoading: (v: boolean) => void
+  setDashboardError: (error: string | null) => void
   clearDashboard: () => void  // UX 5 ADDENDUM — bust cache after logging
 
   // Nutrition
@@ -129,8 +131,10 @@ interface AppState {
     mealType: string; aiInsight?: string | null;
   }>
   mealTotals: { calories: number; protein: number; carbs: number; fat: number; fibre: number }
+  glassesToday: number
   setMeals: (meals: AppState['meals']) => void
   addMeal: (meal: AppState['meals'][0]) => void
+  setGlassesToday: (n: number) => void
 
   // Workout
   activeSession: ActiveSession | null
@@ -139,10 +143,6 @@ interface AppState {
   toggleSet: (setId: string) => void
   clearCompletedSets: () => void
 
-  // Coach
-  chatHistory: Array<{ role: 'user' | 'ai'; content: string; time: string }>
-  addChatMessage: (msg: { role: 'user' | 'ai'; content: string; time: string }) => void
-  clearChat: () => void
 }
 
 const defaultOnboarding = {
@@ -175,13 +175,16 @@ export const useStore = create<AppState>()(
       // Dashboard
       dashboard: null,
       dashboardLoading: false,
+      dashboardError: null,
       setDashboard: (data) => set({ dashboard: data }),
       setDashboardLoading: (v) => set({ dashboardLoading: v }),
-      clearDashboard: () => set({ dashboard: null }),
+      setDashboardError: (error) => set({ dashboardError: error }),
+      clearDashboard: () => set({ dashboard: null, dashboardError: null }),
 
       // Nutrition
       meals: [],
       mealTotals: { calories: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 },
+      glassesToday: 0,
       setMeals: (meals) => {
         const totals = meals.reduce(
           (acc, m) => ({
@@ -199,6 +202,7 @@ export const useStore = create<AppState>()(
         const meals = [...get().meals, meal]
         get().setMeals(meals)
       },
+      setGlassesToday: (glassesToday) => set({ glassesToday }),
 
       // Workout
       activeSession: null,
@@ -210,18 +214,13 @@ export const useStore = create<AppState>()(
         })),
       clearCompletedSets: () => set({ completedSets: {} }),
 
-      // Coach
-      chatHistory: [],
-      addChatMessage: (msg) =>
-        set((s) => ({ chatHistory: [...s.chatHistory, msg] })),
-      clearChat: () => set({ chatHistory: [] }),
     }),
     {
       name: 'vitaliq-store',
       partialize: (s) => ({
         user: s.user,
-        chatHistory: s.chatHistory.slice(-20), // keep last 20 messages
         completedSets: s.completedSets,
+        glassesToday: s.glassesToday,
       }),
     }
   )

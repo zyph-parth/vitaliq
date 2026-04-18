@@ -78,7 +78,7 @@ const CustomTooltip = ({ active, payload }: { active?: boolean; payload?: Array<
 }
 
 export default function SimulatorPage() {
-  const { dashboard } = useDashboard()
+  const { dashboard, error } = useDashboard()
   const [params, setParams] = useState<SimParams>({
     currentWeight: 80, targetWeight: 72, heightCm: 170, age: 25, sex: 'male',
     activityLevel: 1.55, dailyCalories: 2000, weeklyCardioMins: 150, weeklyStrengthDays: 3,
@@ -160,6 +160,12 @@ export default function SimulatorPage() {
           </div>
         </div>
       </section>
+
+      {error && (
+        <div className="mx-4 mb-4 rounded-2xl bg-[#FEE2E2] px-4 py-3 text-[13px] font-medium text-[#B91C1C]">
+          {error}
+        </div>
+      )}
 
       {/* Deficit / rate summary */}
       <div className="mx-4 mb-4 flex flex-wrap gap-2">

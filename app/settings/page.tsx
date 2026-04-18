@@ -6,6 +6,8 @@ import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import { Card, SectionHeader } from '@/components/ui'
+import { useStore } from '@/lib/store'
+import { useDashboard } from '@/lib/useDashboard'
 import { clsx } from 'clsx'
 
 // HIGH 7: Editable profile form
@@ -27,6 +29,8 @@ const GOAL_OPTIONS = [
 export default function SettingsPage() {
   const { data: session, update: updateSession } = useSession()
   const router = useRouter()
+  const { dashboard } = useDashboard()
+  const clearDashboard = useStore((s) => s.clearDashboard)
   const [units, setUnits] = useState<'metric' | 'imperial'>('metric')
   const [theme, setTheme] = useState<'light' | 'system'>('light')
   const [saving, setSaving] = useState(false)
@@ -43,6 +47,7 @@ export default function SettingsPage() {
     activityLevel: 'moderate',
     goal: 'maintain',
   })
+  const [statsPrefilled, setStatsPrefilled] = useState(false)
   const [statsMsg, setStatsMsg] = useState('')
   const [statsSaving, setStatsSaving] = useState(false)
 
@@ -56,23 +61,24 @@ export default function SettingsPage() {
     } catch { /* ignore */ }
   }, [])
 
-  // Pre-fill edit form when user data is available via dashboard
+  // Pre-fill edit form from the shared dashboard cache when the panel opens
   useEffect(() => {
-    if (!showEditStats) return
-    fetch('/api/dashboard')
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (!d?.user) return
-        setEditForm({
-          age: String(d.user.age ?? ''),
-          weightKg: String(d.user.weightKg ?? ''),
-          heightCm: String(d.user.heightCm ?? ''),
-          activityLevel: d.user.activityLevel ?? 'moderate',
-          goal: d.user.goal ?? 'maintain',
-        })
-      })
-      .catch(() => {})
-  }, [showEditStats])
+    if (!showEditStats) {
+      setStatsPrefilled(false)
+      return
+    }
+
+    if (statsPrefilled || !dashboard?.user) return
+
+    setEditForm({
+      age: String(dashboard.user.age ?? ''),
+      weightKg: String(dashboard.user.weightKg ?? ''),
+      heightCm: String(dashboard.user.heightCm ?? ''),
+      activityLevel: dashboard.user.activityLevel ?? 'moderate',
+      goal: dashboard.user.goal ?? 'maintain',
+    })
+    setStatsPrefilled(true)
+  }, [dashboard, showEditStats, statsPrefilled])
 
   const handleSave = () => {
     setSaving(true)
@@ -135,6 +141,7 @@ export default function SettingsPage() {
 
       setStatsMsg('Stats updated ✓')
       await updateSession() // refresh next-auth session to reflect name changes
+      clearDashboard()
       setTimeout(() => {
         setShowEditStats(false)
         setStatsMsg('')

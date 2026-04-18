@@ -54,7 +54,30 @@ export async function POST(req: NextRequest) {
   })
 
   // ── Update streak (centralized) ─────────────────────────────────────────
-  await updateStreak(userId).catch(() => {})
+  const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+  await updateStreak(userId, tz).catch(() => {})
 
   return NextResponse.json({ log }, { status: 201 })
+}
+
+export async function DELETE(req: NextRequest) {
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const userId = session.user.id
+  const id = req.nextUrl.searchParams.get('id')
+
+  if (!id) {
+    return NextResponse.json({ error: 'id is required' }, { status: 400 })
+  }
+
+  const result = await prisma.moodLog.deleteMany({
+    where: { id, userId },
+  })
+
+  if (result.count === 0) {
+    return NextResponse.json({ error: 'Mood log not found or access denied' }, { status: 404 })
+  }
+
+  return NextResponse.json({ success: true })
 }

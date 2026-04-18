@@ -6,6 +6,7 @@ import { useSession } from 'next-auth/react'
 import AppShell from '@/components/layout/AppShell'
 import WeightTrendChart from '@/components/charts/WeightTrendChart'
 import { Card, SectionHeader, Chip, StatCard, Skeleton } from '@/components/ui'
+import { withTimeZone } from '@/lib/client-time'
 import { useDashboard } from '@/lib/useDashboard'
 import { clsx } from 'clsx'
 
@@ -25,6 +26,8 @@ const MOOD_OPTIONS = [
   { v: 7, emoji: '😄' }, { v: 8, emoji: '😁' }, { v: 9, emoji: '🤩' }, { v: 10, emoji: '🔥' },
 ]
 
+const SCORE_OPTIONS = Array.from({ length: 10 }, (_, i) => i + 1)
+
 const BIOMARKER_TYPES = [
   { id: 'glucose', label: 'Fasting glucose', unit: 'mg/dL', placeholder: '70–100' },
   { id: 'cholesterol_total', label: 'Total cholesterol', unit: 'mg/dL', placeholder: '<200' },
@@ -33,20 +36,25 @@ const BIOMARKER_TYPES = [
   { id: 'triglycerides', label: 'Triglycerides', unit: 'mg/dL', placeholder: '<150' },
   { id: 'vitamin_d', label: 'Vitamin D', unit: 'ng/mL', placeholder: '30–80' },
   { id: 'ferritin', label: 'Ferritin', unit: 'ng/mL', placeholder: '12–300' },
+  { id: 'creatinine', label: 'Creatinine', unit: 'mg/dL', placeholder: '0.6–1.2' },
   { id: 'vo2max', label: 'VO₂ max', unit: 'mL/kg/min', placeholder: '>40' },
+  { id: 'biological_age', label: 'Biological age', unit: 'years', placeholder: 'e.g. 34' },
 ]
 
 export default function ProgressPage() {
   const { status } = useSession()
 
   // UX 5: use shared dashboard hook
-  const { dashboard, loading, clearDashboard } = useDashboard()
+  const { dashboard, loading, error, clearDashboard } = useDashboard()
 
   // Badge state
   const [earnedBadgeIds, setEarnedBadgeIds] = useState<Set<string>>(new Set())
 
   // Log state
   const [selectedMood, setSelectedMood] = useState<number | null>(null)
+  const [showMoodFollowUp, setShowMoodFollowUp] = useState(false)
+  const [moodEnergy, setMoodEnergy] = useState(5)
+  const [moodStress, setMoodStress] = useState(5)
   const [moodSubmitting, setMoodSubmitting] = useState(false)
   const [sleepHours, setSleepHours] = useState('')
   const [sleepQuality, setSleepQuality] = useState(7) // MEDIUM 2: quality selector
@@ -75,7 +83,7 @@ export default function ProgressPage() {
     const today = new Date().toDateString()
 
     // Fetch mood logs
-    fetch('/api/mood')
+    fetch(withTimeZone('/api/mood'))
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d?.latest) {
@@ -89,7 +97,7 @@ export default function ProgressPage() {
       .catch(() => {})
 
     // Fetch sleep logs
-    fetch('/api/sleep')
+    fetch(withTimeZone('/api/sleep'))
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d?.latest) {
@@ -102,7 +110,7 @@ export default function ProgressPage() {
       .catch(() => {})
 
     // Fetch weight logs — check if logged today
-    fetch('/api/weight?limit=1')
+    fetch(withTimeZone('/api/weight?limit=1'))
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d?.latest) {
@@ -115,7 +123,7 @@ export default function ProgressPage() {
       .catch(() => {})
 
     // Fetch earned badges
-    fetch('/api/badges')
+    fetch(withTimeZone('/api/badges'))
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (Array.isArray(d?.badges)) {
@@ -127,18 +135,34 @@ export default function ProgressPage() {
 
   // ── Log handlers ────────────────────────────────────────────────────────────
 
-  const logMood = async (v: number) => {
-    setSelectedMood(v)
+  const beginMoodCheckIn = (mood: number) => {
+    setSelectedMood(mood)
+    setMoodEnergy(mood)
+    setMoodStress(Math.max(1, Math.min(10, 10 - mood)))
+    setShowMoodFollowUp(true)
+  }
+
+  const logMood = async () => {
+    if (selectedMood == null) return
+
     setMoodSubmitting(true)
     try {
-      const res = await fetch('/api/mood', {
+      const focus = Math.max(1, Math.min(10, Math.round((selectedMood + moodEnergy + (11 - moodStress)) / 3)))
+      const res = await fetch(withTimeZone('/api/mood'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mood: v, energy: v, stress: Math.max(1, 10 - v), focus: v }),
+        body: JSON.stringify({
+          mood: selectedMood,
+          energy: moodEnergy,
+          stress: moodStress,
+          focus,
+        }),
       })
       if (res.ok) {
         setLoggedToday(l => ({ ...l, mood: true }))
+        setShowMoodFollowUp(false)
         clearDashboard()
+        showMessage('Mood logged ✓')
       }
     } catch { /* silently fail */ } finally {
       setMoodSubmitting(false)
@@ -152,7 +176,7 @@ export default function ProgressPage() {
     try {
       const wakeAt = new Date()
       const bedtimeAt = new Date(wakeAt.getTime() - hours * 3600_000)
-      const res = await fetch('/api/sleep', {
+      const res = await fetch(withTimeZone('/api/sleep'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -180,7 +204,7 @@ export default function ProgressPage() {
     if (!weight || isNaN(kg) || kg < 20 || kg > 500) return
     setWeightSubmitting(true)
     try {
-      const res = await fetch('/api/weight', {
+      const res = await fetch(withTimeZone('/api/weight'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ weightKg: kg }),
@@ -291,6 +315,12 @@ export default function ProgressPage() {
         </div>
       </section>
 
+      {error && (
+        <div className="mx-4 mb-4 rounded-2xl bg-[#FEE2E2] px-4 py-3 text-[13px] font-medium text-[#B91C1C]">
+          {error}
+        </div>
+      )}
+
       {/* Streak banner */}
       {!loading && dashboard?.streak?.message && (
         <div className="mx-4 mb-4 px-5 py-4 rounded-2xl flex items-center gap-3"
@@ -368,8 +398,9 @@ export default function ProgressPage() {
             {MOOD_OPTIONS.map(m => (
               <button
                 key={m.v}
-                onClick={() => !loggedToday.mood && !moodSubmitting && logMood(m.v)}
+                onClick={() => !loggedToday.mood && !moodSubmitting && beginMoodCheckIn(m.v)}
                 disabled={moodSubmitting || loggedToday.mood}
+                aria-label={`Mood ${m.v} out of 10`}
                 className={clsx(
                   'text-[20px] p-1 rounded-lg transition-all disabled:cursor-not-allowed',
                   selectedMood === m.v ? 'scale-125 bg-[#D8F3DC]' : 'hover:scale-110 opacity-60 hover:opacity-100'
@@ -379,6 +410,70 @@ export default function ProgressPage() {
               </button>
             ))}
           </div>
+          {!loggedToday.mood && showMoodFollowUp && selectedMood != null && (
+            <div className="mt-4 rounded-2xl border border-[#E8E8E3] bg-[#F8F8F5] p-4">
+              <div className="text-[12px] font-semibold text-[#1F2937]">
+                Quick follow-up for today&apos;s check-in
+              </div>
+              <div className="mt-3">
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#8A8A85]">
+                  Energy (1–10)
+                </div>
+                <div className="flex gap-1">
+                  {SCORE_OPTIONS.map((score) => (
+                    <button
+                      key={`energy-${score}`}
+                      onClick={() => setMoodEnergy(score)}
+                      className={clsx(
+                        'flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-all',
+                        score === moodEnergy ? 'bg-[#2D6A4F] text-white' : 'bg-white text-[#6B7280]'
+                      )}
+                    >
+                      {score}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-3">
+                <div className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-[#8A8A85]">
+                  Stress (1–10)
+                </div>
+                <div className="flex gap-1">
+                  {SCORE_OPTIONS.map((score) => (
+                    <button
+                      key={`stress-${score}`}
+                      onClick={() => setMoodStress(score)}
+                      className={clsx(
+                        'flex-1 rounded-lg py-1.5 text-[11px] font-semibold transition-all',
+                        score === moodStress ? 'bg-[#DC4A3D] text-white' : 'bg-white text-[#6B7280]'
+                      )}
+                    >
+                      {score}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="mt-4 flex gap-2">
+                <button
+                  onClick={logMood}
+                  disabled={moodSubmitting}
+                  className="flex-1 rounded-xl bg-[#1A1A1A] px-4 py-2.5 text-[12px] font-semibold text-white transition-colors hover:bg-[#2D6A4F] disabled:opacity-50"
+                >
+                  {moodSubmitting ? 'Saving…' : 'Save check-in'}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowMoodFollowUp(false)
+                    setSelectedMood(null)
+                  }}
+                  disabled={moodSubmitting}
+                  className="rounded-xl border border-[#E8E8E3] px-4 py-2.5 text-[12px] font-medium text-[#6B7280] transition-colors hover:border-[#D1D5DB] hover:bg-white disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
         </Card>
       </div>
 
@@ -395,7 +490,7 @@ export default function ProgressPage() {
               onChange={e => setSleepHours(e.target.value)}
               type="number" step="0.5" min="0" max="24"
               placeholder="Hours slept (e.g. 7.5)"
-              disabled={loggedToday.sleep}
+              disabled={loggedToday.sleep || sleepSubmitting}
               className="flex-1 px-3 py-2.5 rounded-xl border border-[#E8E8E3] text-[14px] outline-none focus:border-[#6D28D9] transition-colors disabled:bg-[#F1F1EC]"
             />
             <button

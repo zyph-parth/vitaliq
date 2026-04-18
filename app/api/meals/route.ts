@@ -92,7 +92,8 @@ export async function POST(req: NextRequest) {
   })
 
   // Update streak after successful meal log
-  await updateStreak(userId).catch(() => {}) // non-blocking
+  const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+  await updateStreak(userId, tz).catch(() => {}) // non-blocking
 
   return NextResponse.json({ meal }, { status: 201 })
 }

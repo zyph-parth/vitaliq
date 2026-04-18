@@ -12,6 +12,7 @@ import {
   Cell,
   ReferenceLine,
 } from 'recharts'
+import type { TooltipProps } from 'recharts'
 
 interface DataPoint {
   day: string
@@ -23,12 +24,12 @@ interface WeeklyCalChartProps {
   target: number
 }
 
-const CustomTooltip = ({ active, payload, label }: any) => {
+const CustomTooltip = ({ active, payload, label }: TooltipProps<number, string>) => {
   if (!active || !payload?.length) return null
   return (
     <div className="bg-[#1A1A1A] text-white text-xs px-3 py-2 rounded-xl shadow-lg">
       <div className="font-semibold">{label}</div>
-      <div>{payload[0].value.toLocaleString()} kcal</div>
+      <div>{(payload[0].value ?? 0).toLocaleString()} kcal</div>
     </div>
   )
 }

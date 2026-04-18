@@ -7,6 +7,7 @@ import { clsx } from 'clsx'
 import AppShell from '@/components/layout/AppShell'
 import CoachMessageBody from '@/components/chat/CoachMessageBody'
 import { Chip, LoadingDots } from '@/components/ui'
+import { useStore } from '@/lib/store'
 import { useDashboard } from '@/lib/useDashboard'
 
 interface Message {
@@ -109,6 +110,7 @@ const DEFAULT_CONTEXT: UserContext = {
 let msgCounter = 0
 const nextId = () => `msg-${++msgCounter}-${Date.now()}`
 const COACH_THREAD_STORAGE_PREFIX = 'vitaliq_coach_thread_v1'
+const COACH_HISTORY_LIMIT = 6
 
 function getInitials(name: string): string {
   return name
@@ -223,7 +225,8 @@ function getPriorityGuide(
 
 export default function CoachPage() {
   const { data: session, status } = useSession()
-  const { dashboard } = useDashboard()
+  const { dashboard, error } = useDashboard()
+  const glassesToday = useStore((s) => s.glassesToday)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -271,15 +274,6 @@ export default function CoachPage() {
     const user = dashboard.user
     const pillars = dashboard.pillars
     const readiness = dashboard.readiness
-    const todayKey = `vitaliq_hydration_${new Date().toISOString().slice(0, 10)}`
-    let glassesToday: number | undefined
-
-    try {
-      const saved = localStorage.getItem(todayKey)
-      if (saved) glassesToday = parseInt(saved, 10)
-    } catch {
-      glassesToday = undefined
-    }
 
     setUserCtx({
       name: user?.name || session?.user?.name || 'User',
@@ -300,7 +294,7 @@ export default function CoachPage() {
         workoutsThisWeek: pillars?.training?.sessionsThisWeek ?? 0,
       },
     })
-  }, [dashboard, session])
+  }, [dashboard, glassesToday, session])
 
   useEffect(() => {
     if (!hasConversation && !loading) return
@@ -361,7 +355,7 @@ export default function CoachPage() {
     }
 
     const chatHistory = [...messages, userMessage]
-      .slice(-7)
+      .slice(-COACH_HISTORY_LIMIT)
       .map((message) => ({ role: message.role, content: message.content }))
 
     setMessages((current) => [...current, userMessage])
@@ -565,6 +559,11 @@ export default function CoachPage() {
                 <Chip variant="gray">{formatSleep(userCtx.today.sleepHours)}</Chip>
                 <Chip variant="gray">{hydrationSummary}</Chip>
               </div>
+              {error && (
+                <div className="mt-4 inline-flex rounded-full bg-[#FEE2E2] px-3 py-1 text-xs font-semibold text-[#B91C1C]">
+                  {error}
+                </div>
+              )}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">

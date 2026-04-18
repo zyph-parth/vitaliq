@@ -4,10 +4,26 @@ import { useEffect, useRef, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import AppShell from '@/components/layout/AppShell'
 import { Button, Card, Chip, ProgressBar, SectionHeader, Skeleton } from '@/components/ui'
+import { getLocalDateKey, withTimeZone } from '@/lib/client-time'
+import { useStore } from '@/lib/store'
 import { useDashboard } from '@/lib/useDashboard'
 import { clsx } from 'clsx'
 
 type LogMode = 'text' | 'photo' | 'voice'
+
+interface SpeechRecognitionInstance extends EventTarget {
+  lang: string
+  continuous: boolean
+  start(): void
+  stop(): void
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null
+  onerror: (() => void) | null
+  onend: (() => void) | null
+}
+
+interface SpeechRecognitionResultEvent extends Event {
+  results: { [index: number]: { [index: number]: { transcript: string } } }
+}
 
 interface LoggedMeal {
   id: string
@@ -64,7 +80,9 @@ const getMessageTone = (message: string) => {
 
 export default function NutritionPage() {
   const { status } = useSession()
-  const { clearDashboard } = useDashboard()
+  const { dashboard, clearDashboard } = useDashboard()
+  const glasses = useStore((s) => s.glassesToday)
+  const setGlassesToday = useStore((s) => s.setGlassesToday)
   const [meals, setMeals] = useState<LoggedMeal[]>([])
   const [totals, setTotals] = useState({ calories: 0, protein: 0, carbs: 0, fat: 0, fibre: 0 })
   const [target, setTarget] = useState(2000)
@@ -78,23 +96,21 @@ export default function NutritionPage() {
   const [aiMessageIsError, setAiMessageIsError] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<FoodResult | null>(null)
   const [recording, setRecording] = useState(false)
-  const [glasses, setGlasses] = useState(0)
-  // SpeechRecognition is a browser-only Web API; typed as any to avoid tsconfig lib changes
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const recognitionRef = useRef<any>(null)
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
 
   // Persist hydration glasses per-day to localStorage
-  const todayKey = `vitaliq_hydration_${new Date().toISOString().slice(0, 10)}`
+  const todayKey = `vitaliq_hydration_${getLocalDateKey()}`
   useEffect(() => {
     try {
       const saved = localStorage.getItem(todayKey)
-      if (saved) setGlasses(parseInt(saved, 10))
+      const parsed = saved ? parseInt(saved, 10) : 0
+      setGlassesToday(Number.isFinite(parsed) ? parsed : 0)
     } catch { /* ignore */ }
-  }, [])
+  }, [setGlassesToday, todayKey])
   const setGlassesAndSave = (n: number) => {
     const val = Math.max(0, Math.min(12, n))
-    setGlasses(val)
+    setGlassesToday(val)
     try { localStorage.setItem(todayKey, String(val)) } catch { /* ignore */ }
   }
 
@@ -105,22 +121,23 @@ export default function NutritionPage() {
 
   const fetchMeals = async () => {
     try {
-      const response = await fetch('/api/meals')
+      const response = await fetch(withTimeZone('/api/meals'))
       if (!response.ok) return
       const data = await response.json()
       setMeals(Array.isArray(data.meals) ? data.meals : [])
       if (data.totals) setTotals(data.totals)
       if (data.target) setTarget(data.target)
       if (data.macroTargets) setMacroTargets(data.macroTargets)
-      // Fetch user goal from dashboard for AI context
-      fetch('/api/dashboard')
-        .then(r => r.ok ? r.json() : null)
-        .then(d => { if (d?.user?.goal) setUserGoal(d.user.goal) })
-        .catch(() => {})
     } finally {
       setLoading(false)
     }
   }
+
+  useEffect(() => {
+    if (dashboard?.user?.goal) {
+      setUserGoal(dashboard.user.goal)
+    }
+  }, [dashboard])
 
   const analyzeText = async (text: string) => {
     if (!text.trim()) return
@@ -200,8 +217,12 @@ export default function NutritionPage() {
       return
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const SpeechRecognitionCtor = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+    type SpeechRecognitionCtor = new () => SpeechRecognitionInstance
+    const w = window as Window & {
+      SpeechRecognition?: SpeechRecognitionCtor
+      webkitSpeechRecognition?: SpeechRecognitionCtor
+    }
+    const SpeechRecognitionCtor = w.SpeechRecognition ?? w.webkitSpeechRecognition
 
     if (!SpeechRecognitionCtor) {
       setAiMessage('Voice logging is not supported in this browser.')
@@ -214,8 +235,7 @@ export default function NutritionPage() {
     // UX 2: Use browser locale instead of hardcoded en-IN
     recognition.lang = navigator.language || 'en-US'
     recognition.continuous = false
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    recognition.onresult = (voiceEvent: any) => {
+    recognition.onresult = (voiceEvent: SpeechRecognitionResultEvent) => {
       const transcript = voiceEvent.results[0][0].transcript
       setRecording(false)
       setLogMode('text')
@@ -242,7 +262,7 @@ export default function NutritionPage() {
     setAiLoading(true)
 
     try {
-      const response = await fetch('/api/meals', {
+      const response = await fetch(withTimeZone('/api/meals'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

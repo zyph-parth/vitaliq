@@ -16,13 +16,33 @@ import { Redis } from '@upstash/redis'
 
 // ── Upstash Redis sliding-window rate limiter (20 req/min per user) ─────────
 // Durable across serverless cold starts; no GC needed.
-const ratelimit = new Ratelimit({
-  redis: Redis.fromEnv(),
-  limiter: Ratelimit.slidingWindow(20, '1 m'),
-  prefix: 'vitaliq:gemini',
-})
+const COACH_HISTORY_LIMIT = 6
+
+function ensureUpstashRedisEnv(): boolean {
+  const hasUrl = Boolean(process.env.UPSTASH_REDIS_REST_URL)
+  const hasToken = Boolean(process.env.UPSTASH_REDIS_REST_TOKEN)
+
+  if (hasUrl && hasToken) return true
+
+  const message = '[VitalIQ] UPSTASH_REDIS_REST_URL and UPSTASH_REDIS_REST_TOKEN must be set for Gemini rate limiting.'
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error(message)
+  }
+
+  console.warn(`${message} Rate limiting is disabled in development.`)
+  return false
+}
+
+const ratelimit = ensureUpstashRedisEnv()
+  ? new Ratelimit({
+      redis: Redis.fromEnv(),
+      limiter: Ratelimit.slidingWindow(20, '1 m'),
+      prefix: 'vitaliq:gemini',
+    })
+  : null
 
 async function checkRateLimit(userId: string): Promise<boolean> {
+  if (!ratelimit) return true
   const { success } = await ratelimit.limit(userId)
   return success
 }
@@ -313,7 +333,7 @@ Return ONLY valid JSON (no markdown):
         const question = sanitize(String(payload.question ?? ''), MAX_QUESTION_LEN)
         if (!question) return NextResponse.json({ error: 'question is required.' }, { status: 400 })
         const history = (Array.isArray(payload.chatHistory) ? payload.chatHistory : [])
-          .slice(-4)
+          .slice(-COACH_HISTORY_LIMIT)
           .map((m: { role: string; content: string }) => `${m.role}: ${sanitize(String(m.content), 300)}`)
           .join('\n')
         const hydrationNote = typeof (uc as { glassesToday?: number }).glassesToday === 'number'

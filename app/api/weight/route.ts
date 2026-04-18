@@ -2,9 +2,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { prisma } from '@/lib/prisma'
-import { calculateBMI } from '@/lib/calculations'
+import { calculateBMI, computeAllMetrics } from '@/lib/calculations'
 import { authOptions } from '@/lib/auth'
 import { updateStreak } from '@/lib/streak'
+import type { ActivityLevel, Goal, Sex } from '@/lib/calculations'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -70,17 +71,30 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  // Update user's current weight and recalculate BMI
+  const metrics = computeAllMetrics(
+    parsedWeight,
+    user.heightCm,
+    user.age,
+    user.sex as Sex,
+    user.activityLevel as ActivityLevel,
+    user.goal as Goal
+  )
+
+  // Update user's current weight and recompute dependent body metrics
   await prisma.user.update({
     where: { id: userId },
     data: {
       weightKg: parsedWeight,
-      bmi: calculateBMI(parsedWeight, user.heightCm),
+      bmi: metrics.bmi,
+      bmr: metrics.bmr,
+      tdee: metrics.tdee,
+      bodyFatPct: metrics.estimatedBodyFat,
     },
   })
 
   // Update streak after successful weight log
-  await updateStreak(userId).catch(() => {})
+  const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+  await updateStreak(userId, tz).catch(() => {})
 
   return NextResponse.json({ log }, { status: 201 })
 }

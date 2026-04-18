@@ -8,6 +8,8 @@ import AppShell from '@/components/layout/AppShell'
 import ReadinessRing from '@/components/charts/ReadinessRing'
 import WeeklyCalChart from '@/components/charts/WeeklyCalChart'
 import { Card, Chip, SectionHeader, Skeleton } from '@/components/ui'
+import { withTimeZone } from '@/lib/client-time'
+import { useStore, type DashboardData } from '@/lib/store'
 import { clsx } from 'clsx'
 
 function getGreeting(): string {
@@ -57,16 +59,29 @@ const QUICK_LOGS = [
   },
 ]
 
-const PILLAR_CONFIG = [
+type PillarExtra = { longevityScore: number | null }
+type PillarTrend = { label: string; up: boolean } | null
+type DashboardPillars = DashboardData['pillars']
+type PillarConfig = {
+  key: keyof DashboardPillars | 'longevity'
+  code: string
+  name: string
+  color: string
+  href: string
+  getValue: (pillars: DashboardPillars, extra?: PillarExtra) => string
+  getTrend: (pillars: DashboardPillars, extra?: PillarExtra) => PillarTrend
+}
+
+const PILLAR_CONFIG: PillarConfig[] = [
   {
     key: 'nutrition',
     code: 'NU',
     name: 'Nutrition',
     color: '#D8F3DC',
     href: '/nutrition',
-    getValue: (pillars: any) =>
+    getValue: (pillars: DashboardPillars) =>
       pillars.nutrition ? `${Math.round(pillars.nutrition.today.calories).toLocaleString()} kcal` : '--',
-    getTrend: (pillars: any) =>
+    getTrend: (pillars: DashboardPillars): PillarTrend =>
       pillars.nutrition
         ? pillars.nutrition.today.calories >= pillars.nutrition.target * 0.7
           ? { label: 'On track', up: true }
@@ -79,10 +94,10 @@ const PILLAR_CONFIG = [
     name: 'Training',
     color: '#DBEAFE',
     href: '/workout',
-    getValue: (pillars: any) =>
+    getValue: (pillars: DashboardPillars) =>
       pillars.training ? `${pillars.training.sessionsThisWeek} sessions` : '0 sessions',
-    getTrend: (pillars: any) =>
-      pillars.training?.sessionsThisWeek >= 3
+    getTrend: (pillars: DashboardPillars): PillarTrend =>
+      (pillars.training?.sessionsThisWeek ?? 0) >= 3
         ? { label: 'Consistent', up: true }
         : { label: 'Time to train', up: false },
   },
@@ -92,8 +107,8 @@ const PILLAR_CONFIG = [
     name: 'Sleep',
     color: '#EDE9FE',
     href: '/progress',
-    getValue: (pillars: any) => (pillars.sleep ? `${pillars.sleep.hours}h` : 'Log sleep'),
-    getTrend: (pillars: any) =>
+    getValue: (pillars: DashboardPillars) => (pillars.sleep ? `${pillars.sleep.hours}h` : 'Log sleep'),
+    getTrend: (pillars: DashboardPillars): PillarTrend =>
       pillars.sleep
         ? pillars.sleep.hours >= 7
           ? { label: 'Well rested', up: true }
@@ -106,8 +121,8 @@ const PILLAR_CONFIG = [
     name: 'Mental',
     color: '#FEE2E2',
     href: '/progress',
-    getValue: (pillars: any) => (pillars.mental ? `${pillars.mental.mood}/10` : 'Check in'),
-    getTrend: (pillars: any) =>
+    getValue: (pillars: DashboardPillars) => (pillars.mental ? `${pillars.mental.mood}/10` : 'Check in'),
+    getTrend: (pillars: DashboardPillars): PillarTrend =>
       pillars.mental
         ? pillars.mental.mood >= 6
           ? { label: 'Balanced', up: true }
@@ -120,9 +135,9 @@ const PILLAR_CONFIG = [
     name: 'Longevity',
     color: '#FEF3C7',
     href: '/progress',
-    getValue: (_pillars: any, extra?: any) =>
+    getValue: (_pillars: DashboardPillars, extra?: PillarExtra) =>
       extra?.longevityScore != null ? `${extra.longevityScore} score` : 'Log biomarkers',
-    getTrend: (_pillars: any, extra?: any) =>
+    getTrend: (_pillars: DashboardPillars, extra?: PillarExtra): PillarTrend =>
       extra?.longevityScore != null
         ? extra.longevityScore >= 70
           ? { label: 'Strong', up: true }
@@ -134,7 +149,8 @@ const PILLAR_CONFIG = [
 export default function DashboardPage() {
   const { data: session, status } = useSession()
   const router = useRouter()
-  const [data, setData] = useState<any>(null)
+  const setDashboard = useStore((s) => s.setDashboard)
+  const [data, setData] = useState<DashboardData | null>(null)
   const [longevityScore, setLongevityScore] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -156,7 +172,7 @@ export default function DashboardPage() {
 
       try {
         const [dashRes, bioRes] = await Promise.all([
-          fetch('/api/dashboard'),
+          fetch(withTimeZone('/api/dashboard')),
           fetch('/api/biomarkers'),
         ])
 
@@ -171,7 +187,9 @@ export default function DashboardPage() {
         }
 
         if (!isMounted) return
-        setData(payload)
+        const dashboardData = payload as DashboardData
+        setData(dashboardData)
+        setDashboard(dashboardData)
 
         // Longevity score — best-effort, don't fail the whole dashboard if unavailable
         if (bioRes.ok) {
@@ -192,16 +210,16 @@ export default function DashboardPage() {
     return () => {
       isMounted = false
     }
-  }, [status])
+  }, [setDashboard, status])
 
   const firstName = session?.user?.name?.split(' ')[0] || 'there'
   const today = format(new Date(), 'EEEE, MMMM d')
-  const weeklyDays = Array.isArray(data?.weeklyCalChart) ? data.weeklyCalChart : []
-  const activeDays = weeklyDays.filter((day: any) => (day?.calories || 0) > 0)
+  const weeklyDays = data?.weeklyCalChart ?? []
+  const activeDays = weeklyDays.filter((day) => day.calories > 0)
   const averageCalories =
     activeDays.length > 0
       ? Math.round(
-          activeDays.reduce((sum: number, day: any) => sum + (day?.calories || 0), 0) / activeDays.length
+          activeDays.reduce((sum, day) => sum + day.calories, 0) / activeDays.length
         )
       : 0
 

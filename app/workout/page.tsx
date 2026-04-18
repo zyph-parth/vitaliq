@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import AppShell from '@/components/layout/AppShell'
 import { Card, SectionHeader, Button } from '@/components/ui'
+import { withTimeZone } from '@/lib/client-time'
 import { useDashboard } from '@/lib/useDashboard'
 import { clsx } from 'clsx'
 
@@ -244,25 +245,34 @@ function parseRepsOrDuration(value: string) {
 
   const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes)\b/)
   if (minuteMatch) {
-    return { durationSec: Math.round(Number(minuteMatch[1]) * 60) }
+    return { reps: null, durationSec: Math.round(Number(minuteMatch[1]) * 60), isAmrap: false }
   }
 
   const secondMatch = text.match(/(\d+(?:\.\d+)?)\s*(sec|secs|second|seconds|s)\b/)
   if (secondMatch) {
-    return { durationSec: Math.round(Number(secondMatch[1])) }
+    return { reps: null, durationSec: Math.round(Number(secondMatch[1])), isAmrap: false }
+  }
+
+  const setMatch = text.match(/(\d+)\s*[x\u00D7]\s*\d+/)
+  if (setMatch) {
+    return { reps: parseInt(setMatch[1], 10), durationSec: null, isAmrap: false }
   }
 
   const repMatch = text.match(/(\d+(?:\.\d+)?)\s*reps?\b/)
   if (repMatch) {
-    return { reps: Math.round(Number(repMatch[1])) }
+    return { reps: Math.round(Number(repMatch[1])), durationSec: null, isAmrap: false }
   }
 
   const eachMatch = text.match(/(\d+(?:\.\d+)?)\s*each\b/)
   if (eachMatch) {
-    return { reps: Math.round(Number(eachMatch[1])) }
+    return { reps: Math.round(Number(eachMatch[1])), durationSec: null, isAmrap: false }
   }
 
-  return {}
+  if (text.includes('amrap')) {
+    return { reps: null, durationSec: null, isAmrap: true }
+  }
+
+  return { reps: null, durationSec: null, isAmrap: false }
 }
 
 function parseWeightKg(value: string) {
@@ -297,8 +307,8 @@ function buildWorkoutPayload(
         name: exercise.name,
         sets: exercise.sets,
         repsOrDuration: exercise.repsOrDuration,
-        reps: parsed.reps,
-        durationSec: parsed.durationSec,
+        reps: parsed.reps ?? undefined,
+        durationSec: parsed.durationSec ?? undefined,
         weight: exercise.weight,
         weightKg: parseWeightKg(exercise.weight),
         tip: exercise.tip,
@@ -312,7 +322,7 @@ function buildWorkoutPayload(
 
 export default function WorkoutPage() {
   const { data: session, status } = useSession()
-  const { dashboard, loading: dashboardLoading, clearDashboard } = useDashboard()
+  const { dashboard, loading: dashboardLoading, error, clearDashboard } = useDashboard()
   const [workoutSession, setWorkoutSession] = useState<WorkoutSession | null>(null)
   const [generating, setGenerating] = useState(false)
   const [savingCompletion, setSavingCompletion] = useState(false)
@@ -448,6 +458,8 @@ export default function WorkoutPage() {
   }
 
   const generateWorkout = async () => {
+    if (generating) return
+
     setGenerating(true)
     setCompletionError(null)
     setRestoredDraft(false)
@@ -496,7 +508,7 @@ export default function WorkoutPage() {
     setCompletionError(null)
 
     try {
-      const saveRes = await fetch('/api/workouts', {
+      const saveRes = await fetch(withTimeZone('/api/workouts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(buildWorkoutPayload(workoutSession, completedSets, timer)),
@@ -566,6 +578,12 @@ export default function WorkoutPage() {
           </div>
         </div>
       </section>
+
+      {error && (
+        <div className="mx-4 mb-4 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] text-[#B91C1C]">
+          {error}
+        </div>
+      )}
 
       {!workoutSession ? (
         <div className="px-4">
@@ -711,7 +729,12 @@ export default function WorkoutPage() {
           </div>
 
           {/* Exercise List */}
-          <SectionHeader title="Exercises" action="Regenerate ↺" onAction={generateWorkout} />
+          <SectionHeader
+            title="Exercises"
+            action="Regenerate ↺"
+            onAction={generateWorkout}
+            actionDisabled={generating}
+          />
 
           <div className="px-4 flex flex-col gap-3 mb-4">
             {workoutSession.exercises.map((ex, exIdx) => {

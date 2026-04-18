@@ -4,6 +4,13 @@ export type Sex = 'male' | 'female'
 export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'active' | 'athlete'
 export type Goal = 'lose' | 'muscle' | 'maintain' | 'longevity'
 
+export interface MacroTargets {
+  protein: number
+  carbs: number
+  fat: number
+  fibre: number
+}
+
 export interface BodyMetrics {
   bmi: number
   bmiCategory: string
@@ -11,9 +18,7 @@ export interface BodyMetrics {
   bmr: number
   tdee: number
   targetCalories: number
-  proteinTarget: number
-  carbTarget: number
-  fatTarget: number
+  macroTargets: MacroTargets
   estimatedBodyFat: number | null
   idealWeightMin: number
   idealWeightMax: number
@@ -96,27 +101,6 @@ export function calculateIdealWeight(heightCm: number, sex: Sex): { min: number;
   }
 }
 
-export function calculateMacros(
-  targetCalories: number,
-  weightKg: number,
-  goal: Goal
-): { protein: number; carbs: number; fat: number } {
-  // Protein: 1.6-2.2g/kg based on goal
-  const proteinMultiplier = goal === 'muscle' ? 2.2 : goal === 'lose' ? 2.0 : 1.6
-  const proteinG = Math.round(weightKg * proteinMultiplier)
-  const proteinCal = proteinG * 4
-
-  // Fat: 25-30% of calories
-  const fatCal = Math.round(targetCalories * 0.28)
-  const fatG = Math.round(fatCal / 9)
-
-  // Carbs: remainder
-  const carbCal = targetCalories - proteinCal - fatCal
-  const carbG = Math.max(0, Math.round(carbCal / 4))
-
-  return { protein: proteinG, carbs: carbG, fat: fatG }
-}
-
 export function computeAllMetrics(
   weightKg: number,
   heightCm: number,
@@ -130,9 +114,14 @@ export function computeAllMetrics(
   const bmr = calculateBMR(weightKg, heightCm, age, sex)
   const tdee = calculateTDEE(bmr, activityLevel)
   const targetCalories = Math.max(1200, tdee + GOAL_CALORIE_ADJUSTMENTS[goal])
-  const { protein, carbs, fat } = calculateMacros(targetCalories, weightKg, goal)
   const { min: idealWeightMin, max: idealWeightMax } = calculateIdealWeight(heightCm, sex)
   const estimatedBodyFat = estimateBodyFat(bmi, age, sex)
+  const macroTargets = computeMacroTargets({
+    weightKg,
+    bodyFatPct: estimatedBodyFat,
+    sex,
+    tdee: targetCalories,
+  })
 
   // BMI bar indicator position (14-40 scale mapped to 0-100%)
   const bmiPercentile = Math.min(100, Math.max(0, ((bmi - 14) / 26) * 100))
@@ -144,9 +133,7 @@ export function computeAllMetrics(
     bmr,
     tdee,
     targetCalories,
-    proteinTarget: protein,
-    carbTarget: carbs,
-    fatTarget: fat,
+    macroTargets,
     estimatedBodyFat,
     idealWeightMin,
     idealWeightMax,
@@ -249,8 +236,8 @@ export function computeMacroTargets(user: {
   bodyFatPct: number | null
   sex: string
   tdee: number
-}) {
-  const bodyFatFraction = user.bodyFatPct
+}): MacroTargets {
+  const bodyFatFraction = user.bodyFatPct != null
     ? user.bodyFatPct / 100
     : user.sex === 'male' ? 0.18 : 0.25
   const leanMassKg = user.weightKg * (1 - bodyFatFraction)

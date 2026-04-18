@@ -1,6 +1,36 @@
 // lib/streak.ts — Centralized streak update logic used by all log routes
 
-import { prisma } from '@/lib/prisma'
+import { VALID_BADGE_IDS, type ValidBadgeId } from './badges'
+import { getDayBounds } from './dates'
+import { prisma } from './prisma'
+
+export function computeNextStreakState(
+  streak: { currentDays: number; bestDays: number; lastLogDate: Date | null },
+  today: Date,
+  yesterday: Date
+): { shouldUpdate: boolean; newCurrent: number; newBest: number } {
+  const lastLog = streak.lastLogDate
+  const isNewDay = !lastLog || new Date(lastLog) < today
+
+  if (!isNewDay) {
+    return {
+      shouldUpdate: false,
+      newCurrent: streak.currentDays,
+      newBest: streak.bestDays,
+    }
+  }
+
+  const isConsecutive = Boolean(
+    lastLog &&
+    new Date(lastLog) >= yesterday &&
+    new Date(lastLog) < today
+  )
+
+  const newCurrent = isConsecutive ? streak.currentDays + 1 : 1
+  const newBest = Math.max(streak.bestDays, newCurrent)
+
+  return { shouldUpdate: true, newCurrent, newBest }
+}
 
 /**
  * Updates the user's streak record after any logging action.
@@ -10,9 +40,9 @@ import { prisma } from '@/lib/prisma'
  * - Updates bestDays if current exceeds it
  * Also awards streak milestone badges (7d, 30d, 100d).
  */
-export async function updateStreak(userId: string): Promise<void> {
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
+export async function updateStreak(userId: string, tz: string = 'UTC'): Promise<void> {
+  const { today } = getDayBounds(tz)
+  const { today: yesterday } = getDayBounds(tz, new Date(today.getTime() - 1))
 
   const streak = await prisma.streak.findUnique({ where: { userId } })
 
@@ -21,17 +51,8 @@ export async function updateStreak(userId: string): Promise<void> {
     return
   }
 
-  const lastLog = streak.lastLogDate
-  const isNewDay = !lastLog || new Date(lastLog) < today
-
-  if (!isNewDay) return // already logged today, skip
-
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-  const isConsecutive = lastLog && new Date(lastLog) >= yesterday
-
-  const newCurrent = isConsecutive ? streak.currentDays + 1 : 1
-  const newBest = Math.max(streak.bestDays, newCurrent)
+  const { shouldUpdate, newCurrent, newBest } = computeNextStreakState(streak, today, yesterday)
+  if (!shouldUpdate) return
 
   await prisma.streak.update({
     where: { userId },
@@ -43,7 +64,7 @@ export async function updateStreak(userId: string): Promise<void> {
   })
 
   // Award streak milestone badges (idempotent — upsert with unique constraint)
-  const milestones: Array<{ days: number; badgeId: string }> = [
+  const milestones: Array<{ days: number; badgeId: ValidBadgeId }> = [
     { days: 7, badgeId: 'streak_7' },
     { days: 30, badgeId: 'streak_30' },
     { days: 100, badgeId: 'century' },
@@ -51,7 +72,7 @@ export async function updateStreak(userId: string): Promise<void> {
 
   await Promise.all(
     milestones
-      .filter(({ days }) => newCurrent >= days)
+      .filter(({ days, badgeId }) => newCurrent >= days && VALID_BADGE_IDS.has(badgeId))
       .map(({ badgeId }) =>
         prisma.userBadge.upsert({
           where: { userId_badgeId: { userId, badgeId } },

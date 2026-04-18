@@ -1,8 +1,8 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { signIn } from 'next-auth/react'
+import { signIn, useSession } from 'next-auth/react'
 import { computeAllMetrics, getBMICategory, type ActivityLevel, type Goal, type Sex } from '@/lib/calculations'
 import { useStore } from '@/lib/store'
 import { Button, Input, Select } from '@/components/ui'
@@ -44,6 +44,7 @@ const STEP_COPY: Record<number, { label: string; title: string; description: str
 }
 
 export default function OnboardingPage() {
+  const { status } = useSession()
   const router = useRouter()
   const { setUser } = useStore()
 
@@ -65,6 +66,12 @@ export default function OnboardingPage() {
 
   const progressStep = step === 1 ? 1 : step === 2 || step === 'bmi' ? 2 : 3
   const activeCopy = STEP_COPY[progressStep]
+
+  useEffect(() => {
+    if (status === 'authenticated') {
+      router.replace('/dashboard')
+    }
+  }, [status, router])
 
   const update = (field: string, value: string) =>
     setForm((current) => ({ ...current, [field]: value }))
@@ -132,8 +139,12 @@ export default function OnboardingPage() {
 
       setUser(data.user)
       router.push('/dashboard')
-    } catch (registrationError: any) {
-      setError(registrationError.message)
+    } catch (registrationError: unknown) {
+      setError(
+        registrationError instanceof Error
+          ? registrationError.message
+          : 'Registration failed. Please try again.'
+      )
     } finally {
       setLoading(false)
     }

@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "test": "node tests/run-tests.cjs",
     "start": "next start",
     "postinstall": "prisma generate",
     "db:push": "node scripts/db-runner.cjs push",

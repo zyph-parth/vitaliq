@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { prisma } from '@/lib/prisma'
 import { authOptions } from '@/lib/auth'
+import { VALID_BADGE_IDS, isValidBadgeId } from '@/lib/badges'
 
 // GET — fetch all badges earned by the current user
 export async function GET(req: NextRequest) {
@@ -31,9 +32,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'badgeId is required' }, { status: 400 })
   }
 
+  const normalizedBadgeId = badgeId.trim()
+
+  if (!isValidBadgeId(normalizedBadgeId) || !VALID_BADGE_IDS.has(normalizedBadgeId)) {
+    return NextResponse.json({ error: 'Invalid badgeId' }, { status: 400 })
+  }
+
   const badge = await prisma.userBadge.upsert({
-    where: { userId_badgeId: { userId, badgeId } },
-    create: { userId, badgeId },
+    where: { userId_badgeId: { userId, badgeId: normalizedBadgeId } },
+    create: { userId, badgeId: normalizedBadgeId },
     update: {}, // no-op if already exists (idempotent)
   })
 

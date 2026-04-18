@@ -3,10 +3,11 @@
 
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
+import { toZonedTime } from 'date-fns-tz'
 import { prisma } from '@/lib/prisma'
 import { computeReadinessScore, getStreakMessage, computeMacroTargets } from '@/lib/calculations'
 import { authOptions } from '@/lib/auth'
-import { getDayBounds } from '@/lib/dates'
+import { getDayBounds, getSafeTimeZone } from '@/lib/dates'
 
 // MEDIUM 1 — Realistic intensity map per session type
 const SESSION_INTENSITY: Record<string, number> = {
@@ -35,7 +36,7 @@ export async function GET(req: NextRequest) {
     )
   }
 
-  const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+  const tz = getSafeTimeZone(req.nextUrl.searchParams.get('tz') ?? 'UTC')
   const { today, tomorrow } = getDayBounds(tz)
   const sevenDaysAgo = new Date(today)
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
@@ -124,33 +125,47 @@ export async function GET(req: NextRequest) {
     d.setDate(d.getDate() - (6 - i))
     const dayMeals = weeklyMeals.filter(m => {
       const mDate = new Date(m.loggedAt)
-      return mDate.toDateString() === d.toDateString()
+      const zonedMealDate = toZonedTime(mDate, tz)
+      const zonedDayDate = toZonedTime(d, tz)
+
+      return zonedMealDate.getFullYear() === zonedDayDate.getFullYear()
+        && zonedMealDate.getMonth() === zonedDayDate.getMonth()
+        && zonedMealDate.getDate() === zonedDayDate.getDate()
     })
     return {
-      day: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      day: new Intl.DateTimeFormat('en-US', { weekday: 'short', timeZone: tz }).format(d),
       calories: dayMeals.reduce((s, m) => s + m.calories, 0),
       date: d.toISOString(),
     }
   })
 
   // ── CROSS-PILLAR INSIGHTS ───────────────────────────────────────────────
-  const insights: string[] = []
+  const insights: Array<{ text: string; pillarsUsed: string[] }> = []
 
   // Sleep x Nutrition pattern
   if (lastSleep && lastSleep.totalHours < 6 && nutritionToday.calories > user.tdee * 0.9) {
-    insights.push('Poor sleep often drives overeating. Consider adding protein to your next meal to improve satiety.')
+    insights.push({
+      text: 'Poor sleep often drives overeating. Consider adding protein to your next meal to improve satiety.',
+      pillarsUsed: ['sleep', 'nutrition'],
+    })
   }
 
   // Protein tracking — use lean body mass estimate for target
   const macroTargets = computeMacroTargets(user)
   if (nutritionToday.protein > 0 && nutritionToday.protein < macroTargets.protein * 0.7) {
-    insights.push(`You're tracking ${Math.round(nutritionToday.protein)}g protein vs your ${macroTargets.protein}g target. Add a protein source to your next meal.`)
+    insights.push({
+      text: `You're tracking ${Math.round(nutritionToday.protein)}g protein vs your ${macroTargets.protein}g target. Add a protein source to your next meal.`,
+      pillarsUsed: ['nutrition'],
+    })
   }
 
   // Calorie deficit warning
   const consecutiveLowDays = weeklyCalData.slice(-3).filter(d => d.calories > 0 && d.calories < user.tdee * 0.7).length
   if (consecutiveLowDays >= 2) {
-    insights.push(`You've been significantly under your calorie target for ${consecutiveLowDays} days. This can slow recovery and metabolism.`)
+    insights.push({
+      text: `You've been significantly under your calorie target for ${consecutiveLowDays} days. This can slow recovery and metabolism.`,
+      pillarsUsed: ['nutrition'],
+    })
   }
 
   // ── PERSIST INSIGHTS TO DB ──────────────────────────────────────────────
@@ -161,14 +176,14 @@ export async function GET(req: NextRequest) {
 
   if (existingCount === 0 && insights.length > 0) {
     await prisma.insight.createMany({
-      data: insights.slice(0, 2).map(text => ({
+      data: insights.slice(0, 2).map(({ text, pillarsUsed }) => ({
         userId: user.id,
         type: 'cross_pillar',
         readinessScore: readiness.score,
         headline: text.slice(0, 100),
         body: text,
         actionable: null,
-        pillarsUsed: ['nutrition', 'sleep'],
+        pillarsUsed,
         dismissed: false,
       })),
     }).catch(() => {}) // non-critical
@@ -240,7 +255,7 @@ export async function GET(req: NextRequest) {
       date: w.date,
       weight: w.weightKg,
     })),
-    insights: insights.slice(0, 2),
+    insights: insights.slice(0, 2).map(({ text }) => text),
     streak: streakData,
   })
 }

@@ -26,10 +26,18 @@ export async function GET(req: NextRequest) {
 
   const userId = session.user.id
 
-  const markers = await prisma.biomarker.findMany({
-    where: { userId },
-    orderBy: { recordedAt: 'desc' },
-  })
+  const [markers, history] = await Promise.all([
+    prisma.biomarker.findMany({
+      where: { userId },
+      orderBy: { recordedAt: 'desc' },
+      take: 100,
+    }),
+    prisma.biomarker.findMany({
+      where: { userId },
+      orderBy: { recordedAt: 'desc' },
+      take: 50,
+    }),
+  ])
 
   // Get latest value per type
   const latest: Record<string, {
@@ -59,7 +67,7 @@ export async function GET(req: NextRequest) {
     ? Math.round((inRangeCount / markerList.length) * 100)
     : null
 
-  return NextResponse.json({ markers: markerList, history: markers, longevityScore })
+  return NextResponse.json({ markers: markerList, history, longevityScore })
 }
 
 export async function POST(req: NextRequest) {

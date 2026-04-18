@@ -35,32 +35,50 @@ function parseDateValue(value: unknown) {
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
+type ParsedRepsOrDuration = {
+  reps: number | null
+  durationSec: number | null
+  isAmrap: boolean
+}
+
 function parseRepsOrDuration(value: unknown) {
-  if (typeof value !== 'string') return { reps: null, durationSec: null }
+  if (typeof value !== 'string') {
+    return { reps: null, durationSec: null, isAmrap: false } satisfies ParsedRepsOrDuration
+  }
 
   const text = value.trim().toLowerCase()
 
   const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes)\b/)
   if (minuteMatch) {
-    return { reps: null, durationSec: Math.round(Number(minuteMatch[1]) * 60) }
+    return { reps: null, durationSec: Math.round(Number(minuteMatch[1]) * 60), isAmrap: false }
   }
 
   const secondMatch = text.match(/(\d+(?:\.\d+)?)\s*(sec|secs|second|seconds|s)\b/)
   if (secondMatch) {
-    return { reps: null, durationSec: Math.round(Number(secondMatch[1])) }
+    return { reps: null, durationSec: Math.round(Number(secondMatch[1])), isAmrap: false }
+  }
+
+  const setMatch = text.match(/(\d+)\s*[x×]\s*\d+/)
+  if (setMatch) {
+    return { reps: parseInt(setMatch[1], 10), durationSec: null, isAmrap: false }
   }
 
   const repMatch = text.match(/(\d+(?:\.\d+)?)\s*reps?\b/)
   if (repMatch) {
-    return { reps: Math.round(Number(repMatch[1])), durationSec: null }
+    return { reps: Math.round(Number(repMatch[1])), durationSec: null, isAmrap: false }
   }
 
   const eachMatch = text.match(/(\d+(?:\.\d+)?)\s*each\b/)
   if (eachMatch) {
-    return { reps: Math.round(Number(eachMatch[1])), durationSec: null }
+    return { reps: Math.round(Number(eachMatch[1])), durationSec: null, isAmrap: false }
   }
 
-  return { reps: null, durationSec: null }
+  if (text.includes('amrap')) {
+    return { reps: null, durationSec: null, isAmrap: true }
+  }
+
+  console.warn('Unrecognized repsOrDuration format:', value)
+  return { reps: null, durationSec: null, isAmrap: false }
 }
 
 function parseWeightKg(value: unknown) {
@@ -85,10 +103,14 @@ function buildSetStatuses(rawStatuses: unknown, setCount: number) {
   return Array.from({ length: setCount }, (_, index) => Boolean(rawStatuses[index]))
 }
 
-function buildExerciseNotes(exercise: WorkoutExerciseInput) {
+function buildExerciseNotes(exercise: WorkoutExerciseInput, parsed: ParsedRepsOrDuration) {
   const restSeconds = parsePositiveInt(exercise.restSec)
   const parts = [
-    typeof exercise.repsOrDuration === 'string' ? exercise.repsOrDuration.trim() : null,
+    parsed.isAmrap
+      ? 'AMRAP'
+      : typeof exercise.repsOrDuration === 'string'
+        ? exercise.repsOrDuration.trim()
+        : null,
     typeof exercise.weight === 'string' && exercise.weight.trim() && exercise.weight.trim().toLowerCase() !== 'bodyweight'
       ? exercise.weight.trim()
       : null,
@@ -183,7 +205,7 @@ export async function POST(req: NextRequest) {
           return {
             name: String(rawExercise.name || `Exercise ${index + 1}`).trim().slice(0, 200),
             orderIndex: index,
-            notes: buildExerciseNotes(rawExercise),
+            notes: buildExerciseNotes(rawExercise, parsedFromText),
             sets: {
               create: Array.from({ length: setCount }, (_, setIndex) => ({
                 setNumber: setIndex + 1,
@@ -206,40 +228,12 @@ export async function POST(req: NextRequest) {
   })
 
   if (completedAtDate) {
-    await updateStreak(userId).catch(() => {})
+    const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
+    await updateStreak(userId, tz).catch(() => {})
   }
 
   return NextResponse.json({ session: workoutSession }, { status: 201 })
 }
 
-// PATCH - mark an existing workout as complete
-export async function PATCH(req: NextRequest) {
-  const session = await getServerSession(authOptions)
-  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-
-  const userId = session.user.id
-
-  const body = await req.json()
-  const { sessionId, actualDuration, notes } = body
-
-  if (!sessionId || typeof sessionId !== 'string') {
-    return NextResponse.json({ error: 'sessionId is required' }, { status: 400 })
-  }
-
-  const updated = await prisma.workoutSession.updateMany({
-    where: { id: sessionId, userId },
-    data: {
-      completedAt: new Date(),
-      durationMins: parsePositiveInt(actualDuration) ?? undefined,
-      notes: typeof notes === 'string' && notes.trim() ? notes.trim().slice(0, 1000) : undefined,
-    },
-  })
-
-  if (updated.count === 0) {
-    return NextResponse.json({ error: 'Session not found or access denied' }, { status: 404 })
-  }
-
-  await updateStreak(userId).catch(() => {})
-
-  return NextResponse.json({ success: true })
-}
+// Sessions are completed during POST in the current client flow.
+// Add a PATCH handler back when a "finish later" workflow exists.
