@@ -1,152 +1,232 @@
-# VitalIQ v2.0 — Intelligent Health OS
+# VitalIQ v2.0
 
-A fully merged, production-grade health platform combining **VitalIQ's** full-stack backend, auth, and UI design system with **Vitro's** AI-powered calorie photo tracking, nutrient explorer, and voice logging.
+VitalIQ is a Next.js 14 health platform that combines nutrition logging, workout planning, sleep and mood tracking, biomarker history, readiness scoring, and an AI coach into one app.
 
----
+## What it includes
 
-## ✨ What's merged
+- Credentials auth with NextAuth and bcrypt
+- PostgreSQL plus Prisma data layer
+- Dashboard readiness scoring across sleep, mood, and training
+- Nutrition logging with text, photo, and voice-assisted flows
+- AI meal analysis, workout generation, coaching, and meal swaps
+- Weight, sleep, mood, biomarker, and badge tracking
+- Mobile bottom navigation and desktop sidebar layout
 
-| Feature | Source | Status |
-|---|---|---|
-| Auth (NextAuth + bcrypt) | VitalIQ | ✅ |
-| PostgreSQL + Prisma schema | VitalIQ | ✅ |
-| Readiness score algorithm | VitalIQ | ✅ |
-| Sleep / Mood / Biomarker tracking | VitalIQ | ✅ |
-| AI Workout generator | VitalIQ | ✅ |
-| Body Simulator | VitalIQ | ✅ |
-| Design system (Clash Display, Satoshi, glassmorphism) | VitalIQ | ✅ |
-| **📸 Photo calorie logging (Gemini Vision)** | Vitro | ✅ NEW |
-| **🎙 Voice meal logging (Speech API)** | Vitro | ✅ NEW |
-| **🥦 Nutrient Explorer (24-food DB + AI insights)** | Vitro | ✅ NEW |
-| **🖥 Desktop sidebar navigation** | Merged | ✅ NEW |
-| **🍽 AI food analysis result card** | Vitro | ✅ NEW |
+## Tech stack
 
----
+- Next.js 14 App Router
+- React 18
+- Prisma plus PostgreSQL
+- NextAuth
+- Upstash Redis rate limiting
+- Gemini API
+- Tailwind CSS
+- Zustand
 
-## 🚀 Quick start
+## Quick start
 
-### 1. Install
+### 1. Install dependencies
+
 ```bash
 npm install
 ```
 
-### 2. Set environment variables
+### 2. Create your local env file
+
+Use the full template:
+
 ```bash
-cp .env.example .env.local
+cp .env.local.example .env.local
 ```
 
-Edit `.env.local`:
+If you only want the smaller starter template, `.env.example` is also available, but `.env.local.example` is the source of truth for deploy-ready config.
+
+### 3. Required environment variables
+
 ```env
-# PostgreSQL (use Supabase, Neon, or local)
-DATABASE_URL=postgresql://user:password@host:5432/vitaliq
+# Database
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/postgres"
 
-# NextAuth
-NEXTAUTH_SECRET=your-random-secret-32-chars
-NEXTAUTH_URL=http://localhost:3000
+# Auth
+NEXTAUTH_SECRET="generate-a-random-secret"
+NEXTAUTH_URL="http://localhost:3000"
+NEXT_PUBLIC_APP_URL="http://localhost:3000"
 
-# Google Gemini (free at https://aistudio.google.com)
-GEMINI_API_KEY=your_gemini_api_key
+# Gemini
+GEMINI_API_KEY="your_gemini_api_key"
+
+# Gemini model overrides (optional)
+GEMINI_MODEL_PRIMARY="gemini-2.0-flash"
+# GEMINI_MODEL_FALLBACKS="gemini-1.5-flash,gemini-1.0-pro"
+
+# Upstash Redis
+UPSTASH_REDIS_REST_URL="your_upstash_redis_rest_url"
+UPSTASH_REDIS_REST_TOKEN="your_upstash_redis_rest_token"
 ```
 
-### 3. Set up database
+Notes:
+
+- `NEXTAUTH_SECRET` is required in production. The app intentionally fails startup without it.
+- `NEXTAUTH_URL` and `NEXT_PUBLIC_APP_URL` must match your actual app URL in production.
+- The Gemini route uses Upstash Redis for rate limiting, so the Upstash variables are required if you want `/api/gemini` to work correctly.
+
+### 4. Set up the database
+
 ```bash
-npm run db:setup   # creates tables + seeds demo user: demo@vitaliq.app / demo1234
-# or run them individually:
+npm run db:setup
+```
+
+That runs:
+
+```bash
 npm run db:push
 npm run db:seed
 ```
 
-### 4. Run
+The seed creates a demo account:
+
+- Email: `demo@vitaliq.app`
+- Password: `demo1234`
+
+### 5. Run locally
+
 ```bash
 npm run dev
-# → http://localhost:3000
 ```
 
----
+Open `http://localhost:3000`.
 
-## 🏗️ Project structure
+## Available scripts
 
+```bash
+npm run dev
+npm run build
+npm run start
+npm run db:push
+npm run db:seed
+npm run db:setup
+npm run db:studio
+npm run db:reset
 ```
+
+## Project structure
+
+```text
 vitaliq/
-├── app/
-│   ├── (auth)          login, onboarding
-│   ├── dashboard/      home with readiness ring, pillars, charts
-│   ├── nutrition/      ★ photo/voice/text meal logging + macros
-│   ├── nutrients/      ★ nutrient explorer (24 foods, AI insights)
-│   ├── workout/        AI workout generator + live timer
-│   ├── simulator/      body composition what-if projector
-│   ├── coach/          AI chat coach (Gemini, full user context)
-│   ├── progress/       weight trend, sleep, mood, badges
-│   ├── settings/       integrations, notifications, profile
-│   └── api/
-│       ├── gemini/     ★ merged: text + image vision + all AI types
-│       ├── meals/      CRUD with Prisma
-│       ├── workouts/   session logging
-│       ├── sleep/      sleep log API
-│       ├── mood/       mood check-in API
-│       ├── weight/     weight log API
-│       ├── dashboard/  cross-pillar intelligence aggregator
-│       └── auth/       NextAuth credentials + register
-├── components/
-│   ├── layout/
-│   │   ├── AppShell.tsx    ★ desktop sidebar + mobile bottom nav
-│   │   └── BottomNav.tsx
-│   ├── charts/             ReadinessRing, WeeklyCalChart, WeightTrendChart
-│   └── ui/                 Button, Card, Input, Chip, ProgressBar, etc.
-├── lib/
-│   ├── calculations.ts     BMI, BMR, TDEE, readiness score, macros
-│   ├── store.ts            Zustand global state
-│   └── foods.ts            ★ 24-food nutrient database
-└── prisma/
-    └── schema.prisma       Full relational schema (User, MealLog, WorkoutSession, SleepLog, MoodLog, WeightLog, Biomarker, Badge, Streak)
+|- app/
+|  |- api/
+|  |  |- auth/
+|  |  |- badges/
+|  |  |- biomarkers/
+|  |  |- dashboard/
+|  |  |- gemini/
+|  |  |- meals/
+|  |  |- mood/
+|  |  |- sleep/
+|  |  |- user/
+|  |  |- weight/
+|  |  `- workouts/
+|  |- coach/
+|  |- dashboard/
+|  |- foods/
+|  |- login/
+|  |- nutrition/
+|  |- onboarding/
+|  |- progress/
+|  |- settings/
+|  |- simulator/
+|  `- workout/
+|- components/
+|- lib/
+|- prisma/
+|  |- migrations/
+|  |- schema.prisma
+|  `- seed.ts
+|- scripts/
+|- .env.example
+|- .env.local.example
+|- next.config.js
+`- vercel.json
 ```
 
----
+## Core routes
 
-## 📐 Desktop layout
+- `/dashboard` - readiness, targets, charts, and cross-pillar summary
+- `/nutrition` - meal logging and macro tracking
+- `/foods` - food and nutrient explorer
+- `/workout` - AI workout generation and session logging
+- `/coach` - AI health coach chat
+- `/progress` - trends for weight, sleep, mood, and badges
+- `/simulator` - what-if body composition view
+- `/settings` - profile and local preferences
 
-On screens ≥ 1024px:
-- A fixed **220px sidebar** replaces the bottom nav
-- All 8 pages are accessible from the sidebar
-- Content expands to full width (`max-w-3xl`) with comfortable padding
-- Charts and cards automatically adapt
+There is also a permanent redirect from `/nutrients` to `/foods`.
 
-On mobile:
-- Bottom nav shows 5 core tabs (Home, Nutrition, Train, Coach, Progress)
-- Additional pages (Nutrients, Simulator, Settings) via Profile/more
+## AI features
 
----
-
-## 🧠 AI features
-
-All AI runs **server-side** via `/api/gemini` — your key is never exposed.
+All AI calls are server-side through `/api/gemini`; the browser never receives your Gemini API key.
 
 | Type | Capability |
-|---|---|
-| `meal_analysis` | Text → calories + macros + meal type + insight |
-| **Image/multipart** | **Photo → Gemini Vision → full nutritional breakdown** |
-| `workout_generation` | Readiness-aware AI workout plan with sets/reps/tips |
-| `coach_chat` | Contextual chat with full user health data injected |
-| `bmi_recommendations` | 4 personalised post-onboarding tips |
-| `daily_insight` | Cross-pillar pattern detection |
-| `meal_swap` | Healthier alternative suggestions |
+| --- | --- |
+| `meal_analysis` | Text to calorie and macro estimate |
+| `multipart/form-data` | Photo to meal analysis |
+| `workout_generation` | Readiness-aware workout programming |
+| `coach_chat` | Health coaching with user context |
+| `bmi_recommendations` | Four onboarding recommendations |
+| `daily_insight` | Cross-pillar daily insight generation |
+| `meal_swap` | Two healthier meal alternatives |
 
----
+## Health check
 
-## 🌐 Deploy
+`/api/health` is a lightweight liveness endpoint:
+
+```json
+{ "status": "ok", "timestamp": "..." }
+```
+
+It does not verify database or Gemini connectivity.
+
+## Deployment
+
+### Vercel
+
+This repo includes `vercel.json` with:
+
+- `buildCommand`: `prisma migrate deploy && next build`
+- extended function durations for the Gemini and dashboard routes
+
+### Deploy checklist
+
+1. Create a PostgreSQL database in Supabase, Neon, or another Postgres host.
+2. Create an Upstash Redis database for Gemini rate limiting.
+3. Add all required environment variables in Vercel:
+   - `DATABASE_URL`
+   - `NEXTAUTH_SECRET`
+   - `NEXTAUTH_URL`
+   - `NEXT_PUBLIC_APP_URL`
+   - `GEMINI_API_KEY`
+   - `UPSTASH_REDIS_REST_URL`
+   - `UPSTASH_REDIS_REST_TOKEN`
+   - optional Gemini model overrides
+4. Make sure `NEXTAUTH_URL` and `NEXT_PUBLIC_APP_URL` exactly match your deployed URL.
+5. Deploy:
 
 ```bash
 vercel
-# Add env vars in Vercel dashboard
-# Use Supabase or Neon for free Postgres
 ```
 
----
+### Before calling it production-ready
 
-## 🗺 Roadmap
+- Run a production build locally with `npm run build`
+- Confirm Prisma migrations apply cleanly against the production database
+- Verify login, registration, dashboard loading, and `/api/gemini`
+- Add monitoring and error reporting if you need production observability
+
+## Roadmap
+
 - [ ] Apple Health / Google Fit sync
-- [ ] Barcode scanner (Open Food Facts)
+- [ ] Barcode scanner via Open Food Facts
 - [ ] Push notifications
-- [ ] Stripe Pro tier (₹999/mo)
+- [ ] Stripe Pro tier
 - [ ] Weekly PDF health report
 - [ ] Biological age estimation from biomarkers
