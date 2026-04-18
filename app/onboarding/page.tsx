@@ -18,11 +18,11 @@ const GOALS = [
 ]
 
 const ACTIVITY_OPTIONS = [
-  { value: 'sedentary',  label: 'Sedentary — mostly sitting, desk job' },
-  { value: 'light',     label: 'Light — daily walks, occasional exercise' },
-  { value: 'moderate',  label: 'Moderate — active 3–5 days/week' },
-  { value: 'active',    label: 'Very active — intense training most days' },
-  { value: 'athlete',   label: 'Athlete — twice daily or elite training' },
+  { value: 'sedentary', label: 'Sedentary - desk job, little exercise' },
+  { value: 'light', label: 'Light - walks often, trains 1-2 days/week' },
+  { value: 'moderate', label: 'Moderate - trains 3-5 days/week' },
+  { value: 'active', label: 'Very active - hard training most days' },
+  { value: 'athlete', label: 'Athlete - twice-daily or elite training' },
 ]
 
 const STEP_COPY: Record<number, { label: string; title: string; description: string }> = {
@@ -157,7 +157,7 @@ export default function OnboardingPage() {
               Build a health OS that fits your real routine.
             </h1>
             <p className="mt-6 max-w-xl text-[15px] leading-8 text-[#475569]">
-              Whether you train at home, outdoors, or the gym — VitalIQ adapts to your routine, not the other way around.
+              Whether you train at home, outdoors, or the gym - VitalIQ adapts to your routine, not the other way around.
             </p>
           </div>
 
@@ -185,7 +185,7 @@ export default function OnboardingPage() {
 
             {metrics && bmiInfo && (
               <div className="rounded-[30px] border border-white/70 bg-white/[0.78] p-6 shadow-[0_16px_48px_rgba(15,23,42,0.08)] backdrop-blur-xl">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-[#6b7280] mb-4">Snapshot for {firstName}</div>
+                <div className="mb-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#6b7280]">Snapshot for {firstName}</div>
                 <div className="grid gap-4 xl:grid-cols-3">
                   <div className="rounded-2xl p-4" style={{ background: bmiInfo.color }}>
                     <div className="text-xs uppercase tracking-[0.18em] text-[#4b5563]">BMI</div>
@@ -226,7 +226,7 @@ export default function OnboardingPage() {
                 ))}
               </div>
               <div className="mt-4 text-[11px] font-semibold uppercase tracking-[0.22em] text-[#6b7280]">
-                Step {progressStep} of 3 · {activeCopy.label}
+                Step {progressStep} of 3 - {activeCopy.label}
               </div>
             </div>
 
@@ -301,7 +301,7 @@ export default function OnboardingPage() {
                     <Select
                       label="Sex"
                       value={form.sex}
-                      onChange={(event) => update('sex', event.target.value)}
+                      onValueChange={(nextValue) => update('sex', nextValue)}
                       options={[
                         { value: 'male', label: 'Male' },
                         { value: 'female', label: 'Female' },
@@ -327,10 +327,11 @@ export default function OnboardingPage() {
                   </div>
 
                   <Select
-                    label="Activity level"
+                    label="Activity + training"
                     value={form.activityLevel}
-                    onChange={(event) => update('activityLevel', event.target.value)}
+                    onValueChange={(nextValue) => update('activityLevel', nextValue)}
                     options={ACTIVITY_OPTIONS}
+                    hint="This includes both workout frequency and how active you are outside training."
                   />
                 </div>
 

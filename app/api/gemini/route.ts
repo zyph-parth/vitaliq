@@ -4,7 +4,12 @@ import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
 
 // ── Model candidates with sane defaults ─────────────────────────────────────
-const DEFAULT_GEMINI_MODELS = ['gemini-2.0-flash', 'gemini-1.5-flash']
+const DEFAULT_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
+const RETIRED_GEMINI_MODELS = new Set([
+  'gemini-1.5-flash',
+  'gemini-1.5-pro',
+  'gemini-pro',
+])
 
 import { Ratelimit } from '@upstash/ratelimit'
 import { Redis } from '@upstash/redis'
@@ -34,7 +39,11 @@ function getCandidateModels(): string[] {
     ?.split(',').map(m => m.trim()).filter(Boolean) ?? []
 
   return Array.from(
-    new Set([primary, ...fallbacks, ...DEFAULT_GEMINI_MODELS].filter((m): m is string => Boolean(m)))
+    new Set(
+      [primary, ...fallbacks, ...DEFAULT_GEMINI_MODELS]
+        .filter((m): m is string => Boolean(m))
+        .filter((model) => !RETIRED_GEMINI_MODELS.has(model))
+    )
   )
 }
 
@@ -47,8 +56,9 @@ async function callGemini(
   responseMimeType?: 'application/json'
 ): Promise<string> {
   let lastError: Error | null = null
+  const candidateModels = getCandidateModels()
 
-  for (const model of getCandidateModels()) {
+  for (const model of candidateModels) {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
     const generationConfig: Record<string, unknown> = {
       temperature: temp,
@@ -118,7 +128,9 @@ async function callGemini(
     }
   }
 
-  throw lastError ?? new Error(`No Gemini model responded. Tried: ${getCandidateModels().join(', ')}`)
+  throw new Error(
+    `No Gemini model responded. Tried: ${candidateModels.join(', ')}. Last error: ${lastError?.message ?? 'unknown'}`
+  )
 }
 
 // ── Safe JSON parser — strips code-fence wrappers Gemini sometimes adds ──────
@@ -313,7 +325,7 @@ User health data: ${JSON.stringify(uc)}${hydrationNote}
 Recent chat history:
 ${history}
 User question: "${question}"
-Rules: max 120 words. Be conversational. Reference their actual metrics where relevant. Give one specific actionable recommendation. If data is missing, suggest they log it.`
+Rules: max 120 words. Be conversational. Use plain text only. Do not use markdown, bold markers, asterisks, or code formatting. If you give steps, put each step on its own new line. Reference their actual metrics where relevant. Give one specific actionable recommendation. If data is missing, suggest they log it.`
         temp = 0.75
         maxTokens = 300  // FIX: was unlimited — cap coach responses at 300 tokens
         break

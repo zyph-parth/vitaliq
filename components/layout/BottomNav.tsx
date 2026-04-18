@@ -71,7 +71,7 @@ export default function BottomNav() {
     // Fixed at bottom, centered, floats above content
     <div className="fixed bottom-0 left-0 right-0 z-50 flex justify-center pb-4 px-4 sm:pb-6 pointer-events-none">
       <nav
-        className="pointer-events-auto flex items-center gap-1 rounded-[28px] px-2 py-2 shadow-[0_8px_40px_rgba(0,0,0,0.18)] sm:gap-2"
+        className="pointer-events-auto flex items-center gap-1.5 rounded-[28px] px-[13px] py-2 shadow-[0_8px_40px_rgba(0,0,0,0.18)] sm:gap-2 sm:px-[18px]"
         style={{
           background: 'rgba(15, 15, 15, 0.88)',
           backdropFilter: 'blur(20px)',
@@ -85,13 +85,13 @@ export default function BottomNav() {
           // ── Center Coach button — elevated pill with ring on active ───
           if (item.isCenter) {
             return (
-              <div key={item.id} className="flex items-center gap-1 sm:gap-2">
+              <div key={item.id} className="flex items-center gap-1.5 sm:gap-2.5">
                 {/* Left divider */}
                 <div className="w-px h-8 rounded-full bg-white/10" />
 
                 <button
                   onClick={() => router.push(item.href)}
-                  className="relative flex flex-col items-center gap-1 mx-1"
+                  className="relative mx-1.5 flex flex-col items-center gap-1 sm:mx-2"
                   aria-label={item.label}
                 >
                   {/* Outer glow ring when active */}
@@ -134,7 +134,7 @@ export default function BottomNav() {
               key={item.id}
               onClick={() => router.push(item.href)}
               className={clsx(
-                'relative flex flex-col items-center gap-1 px-3 py-2 sm:px-4 rounded-2xl transition-all duration-200 active:scale-95',
+                'relative flex min-w-[76px] flex-col items-center justify-center gap-1 rounded-2xl px-[13px] py-2 transition-all duration-200 active:scale-95 sm:min-w-[84px] sm:px-[17px]',
                 isActive
                   ? 'bg-white/10'
                   : 'hover:bg-white/[0.06]'

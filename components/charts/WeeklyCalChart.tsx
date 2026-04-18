@@ -4,6 +4,7 @@
 import {
   BarChart,
   Bar,
+  CartesianGrid,
   XAxis,
   YAxis,
   Tooltip,
@@ -34,26 +35,46 @@ const CustomTooltip = ({ active, payload, label }: any) => {
 
 export default function WeeklyCalChart({ data, target }: WeeklyCalChartProps) {
   const today = data[data.length - 1]
+  const highestValue = Math.max(target, ...data.map((entry) => entry.calories), 600)
+  const chartMax = Math.ceil((highestValue * 1.1) / 100) * 100
 
   return (
-    <div style={{ height: 130 }}>
+    <div style={{ height: 178 }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={data} margin={{ top: 8, right: 0, left: -30, bottom: 0 }} barCategoryGap="30%">
+        <BarChart
+          data={data}
+          margin={{ top: 20, right: 6, left: 6, bottom: 0 }}
+          barCategoryGap="26%"
+        >
+          <CartesianGrid vertical={false} stroke="#EEF2F7" strokeDasharray="4 6" />
           <XAxis
             dataKey="day"
             tick={{ fontSize: 10, fill: '#8A8A85', fontFamily: 'Manrope, sans-serif' }}
             axisLine={false}
             tickLine={false}
+            tickMargin={10}
           />
-          <YAxis hide />
-          <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(0,0,0,0.04)', radius: 6 }} />
+          <YAxis hide domain={[0, chartMax]} />
+          <Tooltip content={<CustomTooltip />} cursor={false} />
           <ReferenceLine
             y={target}
-            stroke="#E8E8E3"
+            stroke="#CBD5E1"
             strokeDasharray="4 4"
             strokeWidth={1}
+            ifOverflow="extendDomain"
+            label={{
+              value: 'Target',
+              position: 'insideTopRight',
+              fill: '#94A3B8',
+              fontSize: 10,
+            }}
           />
-          <Bar dataKey="calories" radius={[6, 6, 0, 0]}>
+          <Bar
+            dataKey="calories"
+            radius={[10, 10, 0, 0]}
+            barSize={44}
+            background={{ fill: 'rgba(15,23,42,0.045)' }}
+          >
             {data.map((entry, idx) => (
               <Cell
                 key={idx}
@@ -62,7 +83,7 @@ export default function WeeklyCalChart({ data, target }: WeeklyCalChartProps) {
                     ? '#2D6A4F'
                     : entry.calories >= target
                     ? '#95D5B2'
-                    : '#D8F3DC'
+                    : '#CFE9D8'
                 }
               />
             ))}

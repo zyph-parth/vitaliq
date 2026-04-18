@@ -12,9 +12,11 @@ import { clsx } from 'clsx'
 
 function getGreeting(): string {
   const hour = new Date().getHours()
+  if (hour < 5) return 'Good night'
   if (hour < 12) return 'Good morning'
   if (hour < 17) return 'Good afternoon'
-  return 'Good evening'
+  if (hour < 22) return 'Good evening'
+  return 'Good night'
 }
 
 const QUICK_LOGS = [
@@ -353,8 +355,8 @@ export default function DashboardPage() {
       </section>
 
       <section className="px-4 pb-6 lg:px-0">
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_360px]">
-          <Card padding="lg">
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,1.2fr)_360px] lg:items-start">
+          <Card padding="lg" className="self-start">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <div className="text-sm font-semibold text-[#111827]">Weekly intake</div>
@@ -370,6 +372,19 @@ export default function DashboardPage() {
             ) : weeklyDays.length > 0 ? (
               <div className="mt-5">
                 <WeeklyCalChart data={weeklyDays} target={data?.user?.tdee || 2000} />
+                <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[#eef2f7] pt-4">
+                  <Chip variant={activeDays.length >= 4 ? 'green' : 'gray'}>
+                    {activeDays.length}/7 days logged
+                  </Chip>
+                  <Chip variant="gray">
+                    Target {(data?.user?.tdee || 2000).toLocaleString()} kcal
+                  </Chip>
+                  {activeDays.length <= 1 && (
+                    <span className="text-xs leading-6 text-[#94a3b8]">
+                      One more day of meal logs will make this trend much easier to read.
+                    </span>
+                  )}
+                </div>
               </div>
             ) : loadError ? (
               <div className="mt-5 rounded-2xl border border-[#F5D0D0] bg-[#FFF5F5] px-4 py-3 text-sm text-[#9F2D2D]">

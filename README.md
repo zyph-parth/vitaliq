@@ -56,8 +56,8 @@ NEXT_PUBLIC_APP_URL="http://localhost:3000"
 GEMINI_API_KEY="your_gemini_api_key"
 
 # Gemini model overrides (optional)
-GEMINI_MODEL_PRIMARY="gemini-2.0-flash"
-# GEMINI_MODEL_FALLBACKS="gemini-1.5-flash,gemini-1.0-pro"
+GEMINI_MODEL_PRIMARY="gemini-2.5-flash"
+# GEMINI_MODEL_FALLBACKS="gemini-2.5-flash-lite"
 
 # Upstash Redis
 UPSTASH_REDIS_REST_URL="your_upstash_redis_rest_url"

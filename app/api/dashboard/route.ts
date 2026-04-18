@@ -66,10 +66,10 @@ export async function GET(req: NextRequest) {
       orderBy: { loggedAt: 'desc' },
     }),
 
-    // Last 7 days workouts
+    // Last 7 days completed workouts
     prisma.workoutSession.findMany({
-      where: { userId: user.id, startedAt: { gte: sevenDaysAgo } },
-      orderBy: { startedAt: 'desc' },
+      where: { userId: user.id, completedAt: { gte: sevenDaysAgo, lt: tomorrow } },
+      orderBy: { completedAt: 'desc' },
     }),
 
     // 7-day meal history for chart
@@ -98,7 +98,7 @@ export async function GET(req: NextRequest) {
 
   const daysSinceWorkout = lastWorkout
     ? Math.max(0, Math.floor(
-        (today.getTime() - new Date(lastWorkout.startedAt).setHours(0, 0, 0, 0)) /
+        (today.getTime() - new Date(lastWorkout.completedAt ?? lastWorkout.startedAt).setHours(0, 0, 0, 0)) /
         (1000 * 60 * 60 * 24)
       ))
     : 3

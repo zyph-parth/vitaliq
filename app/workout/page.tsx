@@ -24,6 +24,7 @@ interface WorkoutSession {
   estimatedCalories: number
   coachNote: string
   exercises: Exercise[]
+  source?: 'ai' | 'fallback'
 }
 
 interface UserProfile {
@@ -35,6 +36,32 @@ interface UserProfile {
 
 type Environment = 'home' | 'outdoor' | 'gym'
 type FitnessLevel = 'beginner' | 'intermediate' | 'advanced'
+
+interface WorkoutDraft {
+  version: number
+  environment: Environment
+  fitnessLevel: FitnessLevel
+  workoutSession: WorkoutSession | null
+  completedSets: Record<string, boolean>
+  timer: number
+  timerRunning: boolean
+  savedAt: number
+}
+
+interface WorkoutExercisePayload {
+  name: string
+  sets: number
+  repsOrDuration: string
+  reps?: number
+  durationSec?: number
+  weight: string
+  weightKg?: number
+  tip?: string
+  completedSets: boolean[]
+}
+
+const WORKOUT_DRAFT_STORAGE_PREFIX = 'vitaliq:workout-draft:v1:'
+const WORKOUT_DRAFT_VERSION = 1
 
 const ENVIRONMENTS: { id: Environment; icon: string; label: string; desc: string }[] = [
   { id: 'home',    icon: '🏠', label: 'Home',    desc: 'Bodyweight, bands, dumbbells' },
@@ -200,17 +227,108 @@ const FALLBACK_SESSIONS: Record<Environment, Record<FitnessLevel, WorkoutSession
 
 const DEFAULT_PROFILE: UserProfile = { goal: 'maintain', weightKg: 70, sex: 'male', readinessScore: 70 }
 
+function isEnvironment(value: unknown): value is Environment {
+  return value === 'home' || value === 'outdoor' || value === 'gym'
+}
+
+function isFitnessLevel(value: unknown): value is FitnessLevel {
+  return value === 'beginner' || value === 'intermediate' || value === 'advanced'
+}
+
+function buildWorkoutDraftKey(userKey: string) {
+  return `${WORKOUT_DRAFT_STORAGE_PREFIX}${userKey}`
+}
+
+function parseRepsOrDuration(value: string) {
+  const text = value.trim().toLowerCase()
+
+  const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes)\b/)
+  if (minuteMatch) {
+    return { durationSec: Math.round(Number(minuteMatch[1]) * 60) }
+  }
+
+  const secondMatch = text.match(/(\d+(?:\.\d+)?)\s*(sec|secs|second|seconds|s)\b/)
+  if (secondMatch) {
+    return { durationSec: Math.round(Number(secondMatch[1])) }
+  }
+
+  const repMatch = text.match(/(\d+(?:\.\d+)?)\s*reps?\b/)
+  if (repMatch) {
+    return { reps: Math.round(Number(repMatch[1])) }
+  }
+
+  const eachMatch = text.match(/(\d+(?:\.\d+)?)\s*each\b/)
+  if (eachMatch) {
+    return { reps: Math.round(Number(eachMatch[1])) }
+  }
+
+  return {}
+}
+
+function parseWeightKg(value: string) {
+  const text = value.trim().toLowerCase()
+  if (!text || text === 'bodyweight' || text === 'light') return undefined
+
+  const numberMatch = text.match(/-?\d+(?:\.\d+)?/)
+  return numberMatch ? Number(numberMatch[0]) : undefined
+}
+
+function buildWorkoutPayload(
+  workoutSession: WorkoutSession,
+  completedSets: Record<string, boolean>,
+  timer: number
+) {
+  const actualDurationMins = timer > 0 ? Math.max(1, Math.round(timer / 60)) : workoutSession.durationMins
+  const startedAt = timer > 0 ? new Date(Date.now() - (timer * 1000)).toISOString() : undefined
+
+  return {
+    title: workoutSession.title,
+    sessionType: workoutSession.sessionType,
+    durationMins: actualDurationMins,
+    estimatedCalories: workoutSession.estimatedCalories,
+    aiGenerated: workoutSession.source !== 'fallback',
+    notes: workoutSession.coachNote,
+    startedAt,
+    completedAt: new Date().toISOString(),
+    exercises: workoutSession.exercises.map<WorkoutExercisePayload>((exercise, exerciseIdx) => {
+      const parsed = parseRepsOrDuration(exercise.repsOrDuration)
+
+      return {
+        name: exercise.name,
+        sets: exercise.sets,
+        repsOrDuration: exercise.repsOrDuration,
+        reps: parsed.reps,
+        durationSec: parsed.durationSec,
+        weight: exercise.weight,
+        weightKg: parseWeightKg(exercise.weight),
+        tip: exercise.tip,
+        completedSets: Array.from({ length: exercise.sets }, (_, setIdx) =>
+          Boolean(completedSets[`${exerciseIdx}-${setIdx}`])
+        ),
+      }
+    }),
+  }
+}
+
 export default function WorkoutPage() {
-  const { status } = useSession()
-  const { dashboard, clearDashboard } = useDashboard()
+  const { data: session, status } = useSession()
+  const { dashboard, loading: dashboardLoading, clearDashboard } = useDashboard()
   const [workoutSession, setWorkoutSession] = useState<WorkoutSession | null>(null)
   const [generating, setGenerating] = useState(false)
+  const [savingCompletion, setSavingCompletion] = useState(false)
   const [completedSets, setCompletedSets] = useState<Record<string, boolean>>({})
   const [timer, setTimer] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_PROFILE)
   const [environment, setEnvironment] = useState<Environment>('home')
   const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>('intermediate')
+  const [completionError, setCompletionError] = useState<string | null>(null)
+  const [draftReady, setDraftReady] = useState(false)
+  const [restoredDraft, setRestoredDraft] = useState(false)
+
+  const draftStorageKey = session?.user?.email || session?.user?.name
+    ? buildWorkoutDraftKey(String(session?.user?.email ?? session?.user?.name))
+    : null
 
   // UX 5: use shared dashboard hook — pre-filled from cache, no extra fetch
   useEffect(() => {
@@ -224,10 +342,88 @@ export default function WorkoutPage() {
   }, [dashboard])
 
   useEffect(() => {
+    if (status === 'loading') return
+
+    if (typeof window === 'undefined') {
+      setDraftReady(true)
+      return
+    }
+
+    if (!draftStorageKey) {
+      setDraftReady(true)
+      return
+    }
+
+    try {
+      const raw = window.sessionStorage.getItem(draftStorageKey)
+      if (!raw) {
+        setDraftReady(true)
+        return
+      }
+
+      const draft = JSON.parse(raw) as WorkoutDraft
+      if (draft.version !== WORKOUT_DRAFT_VERSION) {
+        window.sessionStorage.removeItem(draftStorageKey)
+        setDraftReady(true)
+        return
+      }
+
+      setEnvironment(isEnvironment(draft.environment) ? draft.environment : 'home')
+      setFitnessLevel(isFitnessLevel(draft.fitnessLevel) ? draft.fitnessLevel : 'intermediate')
+      setWorkoutSession(draft.workoutSession)
+      setCompletedSets(draft.workoutSession ? draft.completedSets ?? {} : {})
+
+      const recoveredTimer = draft.timerRunning
+        ? (draft.timer ?? 0) + Math.max(0, Math.floor((Date.now() - draft.savedAt) / 1000))
+        : (draft.timer ?? 0)
+
+      setTimer(recoveredTimer)
+      setTimerRunning(Boolean(draft.workoutSession && draft.timerRunning))
+      setRestoredDraft(Boolean(draft.workoutSession))
+    } catch {
+      window.sessionStorage.removeItem(draftStorageKey)
+    } finally {
+      setDraftReady(true)
+    }
+  }, [draftStorageKey, status])
+
+  useEffect(() => {
     if (!timerRunning) return
     const interval = setInterval(() => setTimer(t => t + 1), 1000)
     return () => clearInterval(interval)
   }, [timerRunning])
+
+  useEffect(() => {
+    if (!draftReady || typeof window === 'undefined' || !draftStorageKey) return
+
+    const shouldPersist = Boolean(workoutSession) || environment !== 'home' || fitnessLevel !== 'intermediate'
+    if (!shouldPersist) {
+      window.sessionStorage.removeItem(draftStorageKey)
+      return
+    }
+
+    const draft: WorkoutDraft = {
+      version: WORKOUT_DRAFT_VERSION,
+      environment,
+      fitnessLevel,
+      workoutSession,
+      completedSets: workoutSession ? completedSets : {},
+      timer,
+      timerRunning: Boolean(workoutSession && timerRunning),
+      savedAt: Date.now(),
+    }
+
+    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(draft))
+  }, [
+    completedSets,
+    draftReady,
+    draftStorageKey,
+    environment,
+    fitnessLevel,
+    timer,
+    timerRunning,
+    workoutSession,
+  ])
 
   const formatTime = (s: number) =>
     `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
@@ -238,9 +434,25 @@ export default function WorkoutPage() {
     return 'full gym (barbells, machines, cables)'
   }
 
-  // HIGH 3: generateWorkout now POSTs to DB and stores the session id
+  const resetWorkout = () => {
+    setWorkoutSession(null)
+    setCompletedSets({})
+    setTimer(0)
+    setTimerRunning(false)
+    setRestoredDraft(false)
+    setCompletionError(null)
+
+    if (typeof window !== 'undefined' && draftStorageKey) {
+      window.sessionStorage.removeItem(draftStorageKey)
+    }
+  }
+
   const generateWorkout = async () => {
     setGenerating(true)
+    setCompletionError(null)
+    setRestoredDraft(false)
+    setTimerRunning(false)
+
     try {
       const res = await fetch('/api/gemini', {
         method: 'POST',
@@ -263,57 +475,48 @@ export default function WorkoutPage() {
       })
       const data = await res.json()
       if (data.result && data.result.exercises?.length > 0) {
-        const aiResult = data.result as WorkoutSession
-
-        // HIGH 3: save to DB immediately so PATCH complete works
-        try {
-          const saveRes = await fetch('/api/workouts', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              title: aiResult.title,
-              sessionType: aiResult.sessionType,
-              durationMins: aiResult.durationMins,
-              estimatedCalories: aiResult.estimatedCalories,
-              aiGenerated: true,
-              exercises: aiResult.exercises.map(ex => ({
-                name: ex.name,
-                sets: ex.sets,
-                // Combine repsOrDuration + weight hint + tip into notes field
-                tip: [ex.repsOrDuration, ex.weight !== 'bodyweight' ? ex.weight : null, ex.tip]
-                  .filter(Boolean).join(' · '),
-              })),
-            }),
-          })
-          if (saveRes.ok) {
-            const saved = await saveRes.json()
-            setWorkoutSession({ ...aiResult, id: saved.session.id })
-          } else {
-            // Degrade gracefully — still show workout but without id
-            setWorkoutSession(aiResult)
-          }
-        } catch {
-          // Network error saving to DB — still show the workout
-          setWorkoutSession(aiResult)
-        }
-
+        setWorkoutSession({ ...(data.result as WorkoutSession), source: 'ai' })
         setCompletedSets({})
         setTimer(0)
-        setGenerating(false)  // HIGH 3: was missing on success path
+        setGenerating(false)
         return
       }
     } catch { /* fall through to fallback */ }
 
-    // Smart fallback: pick from curated sessions based on environment + fitness level
-    setWorkoutSession(FALLBACK_SESSIONS[environment][fitnessLevel])
+    setWorkoutSession({ ...FALLBACK_SESSIONS[environment][fitnessLevel], source: 'fallback' })
     setCompletedSets({})
     setTimer(0)
     setGenerating(false)
   }
-  // HIGH 3: removed the useEffect that watched workoutSession to call setGenerating(false) —
-  // it was only there to compensate for the bug above
+
+  const completeWorkout = async () => {
+    if (!workoutSession) return
+
+    setSavingCompletion(true)
+    setCompletionError(null)
+
+    try {
+      const saveRes = await fetch('/api/workouts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(buildWorkoutPayload(workoutSession, completedSets, timer)),
+      })
+
+      if (!saveRes.ok) {
+        throw new Error('Workout save failed')
+      }
+
+      clearDashboard()
+      resetWorkout()
+    } catch {
+      setCompletionError('We could not save this workout yet. Your progress is still here, so you can retry.')
+    } finally {
+      setSavingCompletion(false)
+    }
+  }
 
   const toggleSet = (exerciseIdx: number, setIdx: number) => {
+    setCompletionError(null)
     const key = `${exerciseIdx}-${setIdx}`
     setCompletedSets(s => ({ ...s, [key]: !s[key] }))
   }
@@ -321,6 +524,7 @@ export default function WorkoutPage() {
   const completedCount = Object.values(completedSets).filter(Boolean).length
   const totalSets = workoutSession?.exercises.reduce((s, e) => s + e.sets, 0) ?? 0
   const progress = totalSets > 0 ? completedCount / totalSets : 0
+  const readyForGeneration = status === 'authenticated' && draftReady && !dashboardLoading
 
   return (
     <AppShell>
@@ -423,11 +627,19 @@ export default function WorkoutPage() {
 
           {/* Generate CTA */}
           <div className="flex flex-col items-center pb-8">
-            <Button onClick={generateWorkout} loading={generating} size="lg" fullWidth>
+            <Button
+              onClick={generateWorkout}
+              loading={generating}
+              disabled={!readyForGeneration}
+              size="lg"
+              fullWidth
+            >
               {generating ? 'Building your personalised plan…' : `⚡ Generate ${ENVIRONMENTS.find(e => e.id === environment)?.label} Workout`}
             </Button>
             <p className="mt-3 text-[12px] text-[#8A8A85] text-center">
-              Powered by Gemini AI · Adapted to readiness {userProfile.readinessScore}/100
+              {readyForGeneration
+                ? `Powered by Gemini AI · Adapted to readiness ${userProfile.readinessScore}/100`
+                : 'Loading your readiness, goal, and recovery context...'}
             </p>
           </div>
         </div>
@@ -440,10 +652,15 @@ export default function WorkoutPage() {
           >
             <div className="absolute -right-8 -top-8 w-40 h-40 rounded-full bg-white/5" />
             <div className="text-[10px] font-bold uppercase tracking-widest opacity-60 mb-2">
-              AI-generated · {environment} · {fitnessLevel} · {workoutSession.sessionType.replace(/_/g, ' ')}
+              {workoutSession.source === 'fallback' ? 'Backup plan' : 'AI-generated'} · {environment} · {fitnessLevel} · {workoutSession.sessionType.replace(/_/g, ' ')}
             </div>
             <div className="font-display text-[26px] font-bold mb-1">{workoutSession.title}</div>
             <div className="text-[13px] opacity-70 mb-4">{workoutSession.coachNote}</div>
+            {restoredDraft && (
+              <div className="mb-4 inline-flex rounded-full border border-white/20 bg-white/10 px-3 py-1 text-[11px] font-semibold tracking-wide text-white/80">
+                Restored after refresh
+              </div>
+            )}
 
             <div className="flex gap-5">
               {[
@@ -473,7 +690,7 @@ export default function WorkoutPage() {
                 Reset
               </button>
               <button
-                onClick={() => { setWorkoutSession(null); setCompletedSets({}); setTimer(0); setTimerRunning(false) }}
+                onClick={resetWorkout}
                 className="ml-auto px-3 py-2 rounded-xl bg-white/10 text-white text-[12px] hover:bg-white/20 transition-colors"
               >
                 ↺ New plan
@@ -550,25 +767,21 @@ export default function WorkoutPage() {
             })}
           </div>
 
+          {completionError && (
+            <div className="px-4 mb-4">
+              <div className="rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] text-[#B91C1C]">
+                {completionError}
+              </div>
+            </div>
+          )}
+
           {completedCount > 0 && (
             <div className="px-4 mb-4">
               <Button
                 fullWidth
+                loading={savingCompletion}
                 variant={progress >= 1 ? 'primary' : 'secondary'}
-                onClick={async () => {
-                  if (workoutSession.id) {
-                    await fetch('/api/workouts', {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ sessionId: workoutSession.id, actualDuration: Math.round(timer / 60) }),
-                    })
-                  }
-                  clearDashboard() // bust cache so next dashboard load is fresh
-                  setWorkoutSession(null)
-                  setTimer(0)
-                  setTimerRunning(false)
-                  setCompletedSets({})
-                }}
+                onClick={completeWorkout}
               >
                 {progress >= 1 ? '🎉 Complete workout' : `Complete (${completedCount}/${totalSets} sets)`}
               </Button>

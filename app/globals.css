@@ -53,6 +53,17 @@ body {
     linear-gradient(180deg, #f8f7f2 0%, #fafaf7 100%);
 }
 
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
 h1,
 h2,
 h3,
@@ -380,4 +391,3 @@ h4 {
   animation: heartbeat 2.4s ease-in-out infinite;
   animation-delay: 1s;
 }
-
