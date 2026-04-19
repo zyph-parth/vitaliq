@@ -1,16 +1,26 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Providers } from './providers'
+import { PwaRegistration } from '@/components/PwaRegistration'
 
 export const metadata: Metadata = {
+  applicationName: 'VitalIQ',
   title: 'VitalIQ - Your Intelligent Health OS',
   description:
     'The fitness platform that connects training, nutrition, sleep, mental load, and longevity into one adaptive workspace.',
+  manifest: '/manifest.webmanifest',
   icons: {
     icon: [
       { url: '/vitaliq-tab-icon.svg', type: 'image/svg+xml' },
+      { url: '/pwa-192.png', sizes: '192x192', type: 'image/png' },
     ],
     shortcut: '/vitaliq-tab-icon.svg',
+    apple: [{ url: '/apple-touch-icon.png', sizes: '180x180', type: 'image/png' }],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: 'black-translucent',
+    title: 'VitalIQ',
   },
   openGraph: {
     title: 'VitalIQ',
@@ -39,6 +49,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       </head>
       <body>
         <Providers>{children}</Providers>
+        <PwaRegistration />
       </body>
     </html>
   )
