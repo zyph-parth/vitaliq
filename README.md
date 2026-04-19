@@ -45,7 +45,8 @@ If you only want the smaller starter template, `.env.example` is also available,
 
 ```env
 # Database
-DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/postgres"
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:PORT/postgres?pgbouncer=true&connection_limit=1"
+DIRECT_URL="postgresql://USER:PASSWORD@HOST:PORT/postgres"
 
 # Auth
 NEXTAUTH_SECRET="generate-a-random-secret"
@@ -69,6 +70,7 @@ Notes:
 - `NEXTAUTH_SECRET` is required in production. The app intentionally fails startup without it.
 - `NEXTAUTH_URL` and `NEXT_PUBLIC_APP_URL` must match your actual app URL in production.
 - The Gemini route uses Upstash Redis for rate limiting, so the Upstash variables are required if you want `/api/gemini` to work correctly.
+- For Vercel + Supabase, use a pooled/runtime `DATABASE_URL` and a direct or session-pooled `DIRECT_URL` for Prisma migrations.
 
 ### 4. Set up the database
 
@@ -192,7 +194,7 @@ It does not verify database or Gemini connectivity.
 
 This repo includes `vercel.json` with:
 
-- `buildCommand`: `prisma migrate deploy && next build`
+- `buildCommand`: `DATABASE_URL="$DIRECT_URL" prisma migrate deploy && next build`
 - extended function durations for the Gemini and dashboard routes
 
 ### Deploy checklist
@@ -201,6 +203,7 @@ This repo includes `vercel.json` with:
 2. Create an Upstash Redis database for Gemini rate limiting.
 3. Add all required environment variables in Vercel:
    - `DATABASE_URL`
+   - `DIRECT_URL`
    - `NEXTAUTH_SECRET`
    - `NEXTAUTH_URL`
    - `NEXT_PUBLIC_APP_URL`
