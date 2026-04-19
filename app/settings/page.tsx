@@ -32,7 +32,6 @@ export default function SettingsPage() {
   const { dashboard } = useDashboard()
   const clearDashboard = useStore((s) => s.clearDashboard)
   const [units, setUnits] = useState<'metric' | 'imperial'>('metric')
-  const [theme, setTheme] = useState<'light' | 'system'>('light')
   const [saving, setSaving] = useState(false)
   const [saveMsg, setSaveMsg] = useState('')
   const [dataMsg, setDataMsg] = useState('')
@@ -55,9 +54,7 @@ export default function SettingsPage() {
   useEffect(() => {
     try {
       const savedUnits = localStorage.getItem('vitaliq_units') as 'metric' | 'imperial' | null
-      const savedTheme = localStorage.getItem('vitaliq_theme') as 'light' | 'system' | null
       if (savedUnits) setUnits(savedUnits)
-      if (savedTheme) setTheme(savedTheme)
     } catch { /* ignore */ }
   }, [])
 
@@ -85,7 +82,7 @@ export default function SettingsPage() {
     setSaveMsg('')
     try {
       localStorage.setItem('vitaliq_units', units)
-      localStorage.setItem('vitaliq_theme', theme)
+      localStorage.removeItem('vitaliq_theme')
       setSaveMsg('Preferences saved ✓')
     } catch {
       setSaveMsg('Could not save — check browser storage permissions.')
@@ -171,7 +168,7 @@ export default function SettingsPage() {
                 {session?.user?.name?.split(' ')[0] || 'Your'} workspace.
               </h1>
               <p className="mt-4 max-w-xl text-sm leading-7 text-[#4b5563] sm:text-[15px]">
-                Manage your profile, display preferences, and account controls.
+                Manage your profile, preferences, and account controls.
               </p>
             </div>
 
@@ -297,7 +294,7 @@ export default function SettingsPage() {
       <div className="mx-4 mb-6">
         <Card padding="md">
           {/* Units */}
-          <div className="mb-5">
+          <div>
             <div className="text-[13px] font-semibold mb-2">Units</div>
             <div className="flex gap-2">
               {(['metric', 'imperial'] as const).map(u => (
@@ -318,24 +315,6 @@ export default function SettingsPage() {
             </p>
           </div>
 
-          {/* Theme */}
-          <div>
-            <div className="text-[13px] font-semibold mb-2">Display</div>
-            <div className="flex gap-2">
-              {(['light', 'system'] as const).map(t => (
-                <button
-                  key={t}
-                  onClick={() => setTheme(t)}
-                  className={clsx(
-                    'flex-1 py-2.5 rounded-xl text-[13px] font-semibold capitalize transition-all',
-                    theme === t ? 'bg-[#1A1A1A] text-white' : 'bg-[#F1F1EC] text-[#8A8A85] hover:bg-[#E8E8E3]'
-                  )}
-                >
-                  {t === 'system' ? 'System default' : 'Light mode'}
-                </button>
-              ))}
-            </div>
-          </div>
         </Card>
       </div>
 

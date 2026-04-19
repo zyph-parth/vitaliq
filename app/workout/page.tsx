@@ -272,6 +272,7 @@ function parseRepsOrDuration(value: string) {
     return { reps: null, durationSec: null, isAmrap: true }
   }
 
+  console.warn('[VitalIQ] Unrecognized repsOrDuration format:', value)
   return { reps: null, durationSec: null, isAmrap: false }
 }
 

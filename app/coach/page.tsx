@@ -310,6 +310,8 @@ export default function CoachPage() {
         return
       }
 
+      // Store more than COACH_HISTORY_LIMIT so the UI shows full conversation history;
+      // only COACH_HISTORY_LIMIT messages are sent to the API for context.
       window.sessionStorage.setItem(threadStorageKey, JSON.stringify(messages.slice(-12)))
     } catch {
       // Ignore storage failures and keep the in-memory chat usable.
