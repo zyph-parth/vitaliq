@@ -17,12 +17,16 @@ interface SpeechRecognitionInstance extends EventTarget {
   start(): void
   stop(): void
   onresult: ((event: SpeechRecognitionResultEvent) => void) | null
-  onerror: (() => void) | null
+  onerror: ((event: SpeechRecognitionErrorEvent) => void) | null
   onend: (() => void) | null
 }
 
 interface SpeechRecognitionResultEvent extends Event {
   results: { [index: number]: { [index: number]: { transcript: string } } }
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error?: string
 }
 
 interface LoggedMeal {
@@ -242,10 +246,14 @@ export default function NutritionPage() {
       setMealInput(transcript)
       void analyzeText(transcript)
     }
-    recognition.onerror = () => {
+    recognition.onerror = (voiceEvent: SpeechRecognitionErrorEvent) => {
       setRecording(false)
       setLogMode('text')
-      setAiMessage('Voice capture failed. Try typing the meal instead.')
+      if (voiceEvent.error === 'not-allowed' || voiceEvent.error === 'service-not-allowed') {
+        setAiMessage('Microphone access is blocked. Allow microphone permission in your browser and try again.')
+      } else {
+        setAiMessage('Voice capture failed. Try typing the meal instead.')
+      }
       setAiMessageIsError(true)
     }
 
