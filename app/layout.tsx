@@ -1,6 +1,8 @@
 import type { Metadata, Viewport } from 'next'
 import './globals.css'
 import { Providers } from './providers'
+import { PwaInstallProvider } from '@/components/PwaInstallProvider'
+import { PwaInstallPrompt } from '@/components/PwaInstallPrompt'
 import { PwaRegistration } from '@/components/PwaRegistration'
 
 export const metadata: Metadata = {
@@ -48,7 +50,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body>
-        <Providers>{children}</Providers>
+        <Providers>
+          <PwaInstallProvider>
+            {children}
+            <PwaInstallPrompt />
+          </PwaInstallProvider>
+        </Providers>
         <PwaRegistration />
       </body>
     </html>

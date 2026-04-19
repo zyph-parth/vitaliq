@@ -6,6 +6,7 @@ import { useSession, signOut } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 import AppShell from '@/components/layout/AppShell'
 import { Card, SectionHeader } from '@/components/ui'
+import { usePwaInstall } from '@/components/PwaInstallProvider'
 import { useStore } from '@/lib/store'
 import { useDashboard } from '@/lib/useDashboard'
 import { clsx } from 'clsx'
@@ -30,6 +31,7 @@ export default function SettingsPage() {
   const { data: session, update: updateSession } = useSession()
   const router = useRouter()
   const { dashboard } = useDashboard()
+  const { isInstalled, isIosSafari, canInstall, installing, requestInstall, resetDismissal } = usePwaInstall()
   const clearDashboard = useStore((s) => s.clearDashboard)
   const [units, setUnits] = useState<'metric' | 'imperial'>('metric')
   const [saving, setSaving] = useState(false)
@@ -49,6 +51,8 @@ export default function SettingsPage() {
   const [statsPrefilled, setStatsPrefilled] = useState(false)
   const [statsMsg, setStatsMsg] = useState('')
   const [statsSaving, setStatsSaving] = useState(false)
+  const [installMsg, setInstallMsg] = useState('')
+  const [showIosInstallHelp, setShowIosInstallHelp] = useState(false)
 
   // Load preferences from localStorage on mount
   useEffect(() => {
@@ -90,6 +94,37 @@ export default function SettingsPage() {
       setSaving(false)
       setTimeout(() => setSaveMsg(''), 3000)
     }
+  }
+
+  const handleInstallVitaliq = async () => {
+    setInstallMsg('')
+
+    if (isInstalled) {
+      setInstallMsg('VitalIQ is already installed on this device.')
+      return
+    }
+
+    if (canInstall) {
+      resetDismissal()
+      const outcome = await requestInstall()
+
+      if (outcome === 'accepted') {
+        setInstallMsg('VitalIQ was added successfully.')
+      } else if (outcome === 'dismissed') {
+        setInstallMsg('Install was dismissed. You can try again any time from Settings.')
+      } else {
+        setInstallMsg('Install is not available right now. Refresh once and try again.')
+      }
+      return
+    }
+
+    if (isIosSafari) {
+      setShowIosInstallHelp(true)
+      setInstallMsg('Use Safari Share → Add to Home Screen to install VitalIQ.')
+      return
+    }
+
+    setInstallMsg('Install becomes available in a supported browser like Chrome once the app is install-ready.')
   }
 
   // HIGH 7: Save updated stats to PATCH /api/user
@@ -313,6 +348,59 @@ export default function SettingsPage() {
             <p className="text-[11px] text-[#8A8A85] mt-2">
               Affects display in Progress and Dashboard. Core calculations always use metric internally.
             </p>
+          </div>
+
+          <div className="mt-5 border-t border-[#F1F1EC] pt-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="text-[13px] font-semibold">Install VitalIQ</div>
+                <p className="mt-1 text-[11px] leading-5 text-[#8A8A85]">
+                  Keep VitalIQ on your home screen for faster launch and a cleaner app-like experience.
+                </p>
+              </div>
+              <span
+                className={clsx(
+                  'rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
+                  isInstalled ? 'bg-[#D8F3DC] text-[#2D6A4F]' : 'bg-[#F1F1EC] text-[#6B7280]'
+                )}
+              >
+                {isInstalled ? 'Installed' : 'Available'}
+              </span>
+            </div>
+
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={() => void handleInstallVitaliq()}
+                disabled={installing || isInstalled}
+                className="flex-1 rounded-2xl bg-[#1A1A1A] px-4 py-3 text-[13px] font-semibold text-white transition-colors hover:bg-[#2D6A4F] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isInstalled ? 'Installed on this device' : installing ? 'Opening install…' : 'Install VitalIQ'}
+              </button>
+              {!isInstalled && (
+                <button
+                  onClick={() => {
+                    resetDismissal()
+                    setInstallMsg('Install prompt reset. If your browser supports it, VitalIQ can prompt again.')
+                  }}
+                  className="rounded-2xl border border-[#E8E8E3] px-4 py-3 text-[12px] font-semibold text-[#6B7280] transition-colors hover:border-[#2D6A4F] hover:text-[#2D6A4F]"
+                >
+                  Reset prompt
+                </button>
+              )}
+            </div>
+
+            {showIosInstallHelp && !isInstalled && (
+              <div className="mt-3 rounded-2xl border border-[#E8E8E3] bg-[#FAFAF7] px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#6B7280]">iPhone steps</div>
+                <p className="mt-2 text-[12px] leading-6 text-[#4B5563]">
+                  Open Safari&apos;s Share menu, then choose <span className="font-semibold text-[#111827]">Add to Home Screen</span>.
+                </p>
+              </div>
+            )}
+
+            {installMsg && (
+              <p className="mt-3 text-[12px] text-[#6B7280] leading-relaxed">{installMsg}</p>
+            )}
           </div>
 
         </Card>
