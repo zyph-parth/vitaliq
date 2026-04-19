@@ -1,0 +1,16 @@
+<svg width="72" height="72" viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="vitaliq-tab-gradient" x1="14" y1="12" x2="58" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2D6A4F"/>
+      <stop offset="1" stop-color="#52B788"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="72" height="72" rx="20" fill="url(#vitaliq-tab-gradient)"/>
+  <path
+    d="M9 36H15L24 9L36 61L45 25L51 36H63"
+    stroke="white"
+    stroke-width="6"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

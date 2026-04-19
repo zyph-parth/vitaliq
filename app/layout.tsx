@@ -6,7 +6,12 @@ export const metadata: Metadata = {
   title: 'VitalIQ - Your Intelligent Health OS',
   description:
     'The fitness platform that connects training, nutrition, sleep, mental load, and longevity into one adaptive workspace.',
-  icons: { icon: '/favicon.ico' },
+  icons: {
+    icon: [
+      { url: '/vitaliq-tab-icon.svg', type: 'image/svg+xml' },
+    ],
+    shortcut: '/vitaliq-tab-icon.svg',
+  },
   openGraph: {
     title: 'VitalIQ',
     description: 'Your intelligent health operating system',
@@ -38,4 +43,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   )
 }
-
