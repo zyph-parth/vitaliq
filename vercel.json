@@ -1,5 +1,5 @@
 {
-  "buildCommand": "DATABASE_URL=\"$DIRECT_URL\" prisma migrate deploy && next build",
+  "buildCommand": "prisma migrate deploy && next build",
   "functions": {
     "app/api/gemini/route.ts": { "maxDuration": 30 },
     "app/api/dashboard/route.ts": { "maxDuration": 15 }
