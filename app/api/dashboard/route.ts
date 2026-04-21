@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { computeReadinessScore, getStreakMessage, computeMacroTargets } from '@/lib/calculations'
 import { authOptions } from '@/lib/auth'
 import { getDayBounds, getSafeTimeZone } from '@/lib/dates'
+import { hasCompleteHealthProfile, profileIncompleteResponseBody } from '@/lib/user-profile'
 
 export const dynamic = 'force-dynamic'
 
@@ -40,6 +41,10 @@ export async function GET(req: NextRequest) {
         },
         { status: 401 }
       )
+    }
+
+    if (!hasCompleteHealthProfile(user)) {
+      return NextResponse.json(profileIncompleteResponseBody(), { status: 428 })
     }
 
     const tz = getSafeTimeZone(req.nextUrl.searchParams.get('tz') ?? 'UTC')

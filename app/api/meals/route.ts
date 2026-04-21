@@ -6,6 +6,7 @@ import { authOptions } from '@/lib/auth'
 import { updateStreak } from '@/lib/streak'
 import { computeMacroTargets } from '@/lib/calculations'
 import { getDayBounds } from '@/lib/dates'
+import { hasCompleteHealthProfile, profileIncompleteResponseBody } from '@/lib/user-profile'
 
 // GET — fetch today's meals
 export async function GET(req: NextRequest) {
@@ -16,6 +17,9 @@ export async function GET(req: NextRequest) {
 
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  if (!hasCompleteHealthProfile(user)) {
+    return NextResponse.json(profileIncompleteResponseBody(), { status: 428 })
+  }
 
   const tz = req.nextUrl.searchParams.get('tz') ?? 'UTC'
   const { today, tomorrow } = getDayBounds(tz)
@@ -58,6 +62,9 @@ export async function POST(req: NextRequest) {
   // Only need user profile for TDEE/protein targets — fetch by id
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  if (!hasCompleteHealthProfile(user)) {
+    return NextResponse.json(profileIncompleteResponseBody(), { status: 428 })
+  }
 
   const body = await req.json()
   const { description, calories, proteinG, carbsG, fatG, fibreG, mealType, aiInsight, ingredients } = body

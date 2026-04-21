@@ -18,9 +18,15 @@ async function run() {
       user: {
         findUnique: async () => ({
           id: 'user-1',
+          age: 29,
           weightKg: 77,
+          heightCm: 178,
           bodyFatPct: 18,
           sex: 'male',
+          activityLevel: 'moderate',
+          goal: 'maintain',
+          bmi: 24.3,
+          bmr: 1700,
           tdee: 2400,
         }),
       },

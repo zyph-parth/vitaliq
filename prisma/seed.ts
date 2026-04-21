@@ -19,6 +19,7 @@ async function main() {
       name: 'Arjun Demo',
       email: 'demo@vitaliq.app',
       passwordHash,
+      profileComplete: true,
       age: 26, sex: 'male', heightCm: 178, weightKg: 82,
       activityLevel: 'moderate', goal: 'lose',
       bmi: metrics.bmi, bmr: metrics.bmr, tdee: metrics.tdee,

@@ -18,22 +18,25 @@ model User {
   id            String   @id @default(cuid())
   email         String   @unique
   name          String
-  passwordHash  String
+  passwordHash  String?
+  googleId      String?  @unique
+  image         String?
+  profileComplete Boolean @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   // Body metrics
-  age           Int
-  sex           String   // "male" | "female"
-  heightCm      Float
-  weightKg      Float
-  activityLevel String   // sedentary | light | moderate | active | athlete
-  goal          String   // lose | muscle | maintain | longevity
+  age           Int?
+  sex           String?  // "male" | "female"
+  heightCm      Float?
+  weightKg      Float?
+  activityLevel String?  // sedentary | light | moderate | active | athlete
+  goal          String?  // lose | muscle | maintain | longevity
 
   // Calculated (stored for perf)
-  bmi           Float
-  bmr           Float
-  tdee          Float
+  bmi           Float?
+  bmr           Float?
+  tdee          Float?
   bodyFatPct    Float?
 
   // Relations

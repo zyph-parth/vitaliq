@@ -44,7 +44,7 @@ const STEP_COPY: Record<number, { label: string; title: string; description: str
 }
 
 export default function OnboardingPage() {
-  const { status } = useSession()
+  const { data: session, status, update: updateSession } = useSession()
   const router = useRouter()
   const { setUser } = useStore()
 
@@ -64,14 +64,31 @@ export default function OnboardingPage() {
   })
   const [metrics, setMetrics] = useState<ReturnType<typeof computeAllMetrics> | null>(null)
 
-  const progressStep = step === 1 ? 1 : step === 2 || step === 'bmi' ? 2 : 3
+  const isProfileCompletion = status === 'authenticated' && session?.user?.profileComplete === false
+  const effectiveStep = isProfileCompletion && step === 1 ? 2 : step
+  const progressStep = effectiveStep === 1 ? 1 : effectiveStep === 2 || effectiveStep === 'bmi' ? 2 : 3
   const activeCopy = STEP_COPY[progressStep]
 
   useEffect(() => {
     if (status === 'authenticated') {
+      if (session?.user?.profileComplete === false) {
+        setForm((current) => {
+          const nextName = current.name || session.user.name || ''
+          const nextEmail = current.email || session.user.email || ''
+
+          if (current.name === nextName && current.email === nextEmail) {
+            return current
+          }
+
+          return { ...current, name: nextName, email: nextEmail }
+        })
+        setStep((current) => current === 1 ? 2 : current)
+        return
+      }
+
       router.replace('/dashboard')
     }
-  }, [status, router])
+  }, [status, session?.user?.email, session?.user?.name, session?.user?.profileComplete, router])
 
   const update = (field: string, value: string) =>
     setForm((current) => ({ ...current, [field]: value }))
@@ -115,11 +132,16 @@ export default function OnboardingPage() {
     setError('')
 
     try {
-      const response = await fetch('/api/auth/register', {
-        method: 'POST',
+      const response = await fetch(isProfileCompletion ? '/api/user' : '/api/auth/register', {
+        method: isProfileCompletion ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...form,
+          name: form.name || session?.user?.name || '',
+          email: form.email,
+          password: form.password,
+          sex: form.sex,
+          activityLevel: form.activityLevel,
+          goal: form.goal,
           age: parseInt(form.age, 10),
           heightCm: parseFloat(form.heightCm),
           weightKg: parseFloat(form.weightKg),
@@ -129,6 +151,13 @@ export default function OnboardingPage() {
       const data = await response.json()
       if (!response.ok) {
         throw new Error(data.error || 'Registration failed.')
+      }
+
+      if (isProfileCompletion) {
+        setUser(data.user)
+        await updateSession()
+        router.push('/dashboard')
+        return
       }
 
       await signIn('credentials', {
@@ -151,7 +180,7 @@ export default function OnboardingPage() {
   }
 
   const bmiInfo = metrics ? getBMICategory(metrics.bmi) : null
-  const firstName = form.name.split(' ')[0] || 'You'
+  const firstName = form.name.split(' ')[0] || session?.user?.name?.split(' ')[0] || 'You'
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[linear-gradient(145deg,#eef6ff_0%,#fafaf7_38%,#effaf3_100%)]">
@@ -241,7 +270,7 @@ export default function OnboardingPage() {
               </div>
             </div>
 
-            {step === 1 && (
+            {step === 1 && !isProfileCompletion && (
               <div className="mt-8 animate-fade-up">
                 <h2 className="font-display text-[2.1rem] font-semibold leading-none text-[#111827]">
                   Create your account.
@@ -456,7 +485,7 @@ export default function OnboardingPage() {
 
                 <div className="mt-6">
                   <Button fullWidth loading={loading} onClick={handleRegister}>
-                    Launch VitalIQ
+                    {isProfileCompletion ? 'Finish setup' : 'Launch VitalIQ'}
                   </Button>
                 </div>
               </div>

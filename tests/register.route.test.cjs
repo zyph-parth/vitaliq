@@ -8,10 +8,12 @@ async function run() {
   process.env.NODE_ENV = 'test'
 
   const calls = []
+  let createdUserData = null
   const tx = {
     user: {
-      create: async () => {
+      create: async ({ data }) => {
         calls.push('user.create')
+        createdUserData = data
         return {
           id: 'user-1',
           name: 'Taylor',
@@ -62,6 +64,7 @@ async function run() {
 
     assert.equal(response.status, 201)
     assert.deepEqual(calls, ['user.create', 'weightLog.create'])
+    assert.equal(createdUserData.profileComplete, true)
 
     const body = await response.json()
     assert.equal(body.user.email, 'taylor@example.com')

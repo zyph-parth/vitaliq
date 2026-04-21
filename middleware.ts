@@ -1,10 +1,36 @@
-// middleware.ts — Route protection
+// middleware.ts - Route protection
 import { withAuth } from 'next-auth/middleware'
 import { NextResponse } from 'next/server'
 
 export default withAuth(
   function middleware(req) {
-    // All matched routes require auth — redirect to login if not authed
+    const pathname = req.nextUrl.pathname
+    const profileIncomplete = req.nextauth.token?.profileComplete === false
+
+    if (profileIncomplete) {
+      const isProfileUpdateRoute = pathname === '/api/user' || pathname.startsWith('/api/user/')
+
+      if (isProfileUpdateRoute) {
+        return NextResponse.next()
+      }
+
+      if (pathname.startsWith('/api/')) {
+        return NextResponse.json(
+          {
+            error: 'Complete your health profile before using this feature.',
+            code: 'PROFILE_INCOMPLETE',
+          },
+          { status: 428 }
+        )
+      }
+
+      const url = req.nextUrl.clone()
+      url.pathname = '/onboarding'
+      url.searchParams.set('profile', '1')
+      return NextResponse.redirect(url)
+    }
+
+    // All matched routes require auth - redirect to login if not authed.
     return NextResponse.next()
   },
   {

@@ -6,6 +6,7 @@ import { calculateBMI, computeAllMetrics } from '@/lib/calculations'
 import { authOptions } from '@/lib/auth'
 import { updateStreak } from '@/lib/streak'
 import type { ActivityLevel, Goal, Sex } from '@/lib/calculations'
+import { hasCompleteHealthProfile, profileIncompleteResponseBody } from '@/lib/user-profile'
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions)
@@ -15,6 +16,9 @@ export async function GET(req: NextRequest) {
 
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!hasCompleteHealthProfile(user)) {
+    return NextResponse.json(profileIncompleteResponseBody(), { status: 428 })
+  }
 
   const { searchParams } = new URL(req.url)
   const rawLimit = parseInt(searchParams.get('limit') || '30')
@@ -48,6 +52,9 @@ export async function POST(req: NextRequest) {
 
   const user = await prisma.user.findUnique({ where: { id: userId } })
   if (!user) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+  if (!hasCompleteHealthProfile(user)) {
+    return NextResponse.json(profileIncompleteResponseBody(), { status: 428 })
+  }
 
   const body = await req.json()
   const { weightKg, bodyFatPct, notes } = body

@@ -2,7 +2,7 @@
 // app/login/page.tsx — Premium light theme
 
 import { useState, useEffect } from 'react'
-import { signIn, useSession } from 'next-auth/react'
+import { getProviders, signIn, useSession } from 'next-auth/react'
 import { useRouter } from 'next/navigation'
 
 const HERO_STATS = [
@@ -25,10 +25,18 @@ export default function LoginPage() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
+  const [googleAvailable, setGoogleAvailable] = useState(false)
   const [error, setError] = useState('')
   const [mounted, setMounted] = useState(false)
 
   useEffect(() => { setMounted(true) }, [])
+
+  useEffect(() => {
+    getProviders()
+      .then((providers) => setGoogleAvailable(Boolean(providers?.google)))
+      .catch(() => setGoogleAvailable(false))
+  }, [])
 
   useEffect(() => {
     if (status === 'authenticated') {
@@ -44,6 +52,12 @@ export default function LoginPage() {
     const result = await signIn('credentials', { email, password, redirect: false })
     if (result?.error) { setError('Incorrect email or password. Try again.'); setLoading(false); return }
     router.push('/dashboard')
+  }
+
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true)
+    setError('')
+    await signIn('google', { callbackUrl: '/dashboard' })
   }
 
   if (status === 'authenticated') return null
@@ -207,6 +221,28 @@ export default function LoginPage() {
                   ) : 'Sign in →'}
                 </button>
               </form>
+
+              {googleAvailable && (
+                <>
+                  <div className="my-5 flex items-center gap-3">
+                    <div className="h-px flex-1 bg-[#f3f4f6]" />
+                    <span className="text-[11px] font-medium text-[#9ca3af]">or</span>
+                    <div className="h-px flex-1 bg-[#f3f4f6]" />
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleGoogleSignIn}
+                    disabled={loading || googleLoading}
+                    className="flex w-full items-center justify-center gap-3 rounded-xl border border-[#e5e7eb] bg-white/75 py-3 text-[14px] font-semibold text-[#374151] transition-all hover:border-[#d1d5db] hover:bg-white hover:shadow-sm active:scale-[0.98] disabled:opacity-60"
+                  >
+                    <span className="flex h-5 w-5 items-center justify-center rounded-full border border-[#e5e7eb] bg-white text-[13px] font-bold text-[#4285f4]">
+                      G
+                    </span>
+                    {googleLoading ? 'Opening Google...' : 'Continue with Google'}
+                  </button>
+                </>
+              )}
 
               <div className="my-5 flex items-center gap-3">
                 <div className="h-px flex-1 bg-[#f3f4f6]" />

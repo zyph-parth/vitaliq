@@ -107,6 +107,7 @@ export async function POST(req: NextRequest) {
           name: String(name).trim().slice(0, 100),
           email: normalizedEmail,
           passwordHash,
+          profileComplete: true,
           age: parsedAge,
           sex,
           heightCm: parsedHeight,
