@@ -2,6 +2,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getServerSession } from 'next-auth'
 import { authOptions } from '@/lib/auth'
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
+import {
+  bmiRecommendationsSchema,
+  dailyInsightSchema,
+  mealAnalysisSchema,
+  mealSwapSchema,
+  parseModelJson,
+  photoMealAnalysisSchema,
+  validateBmiRecommendations,
+  validateDailyInsight,
+  validateMealSwap,
+  validatePhotoMealAnalysis,
+  validateTextMealAnalysis,
+  validateWorkoutGeneration,
+  validationSummary,
+  workoutGenerationSchema,
+  type GeminiJsonSchema,
+  type ValidationResult,
+} from '@/lib/llm-validation'
 
 // ── Model candidates with sane defaults ─────────────────────────────────────
 const DEFAULT_GEMINI_MODELS = ['gemini-2.5-flash', 'gemini-2.5-flash-lite']
@@ -10,9 +30,6 @@ const RETIRED_GEMINI_MODELS = new Set([
   'gemini-1.5-pro',
   'gemini-pro',
 ])
-
-import { Ratelimit } from '@upstash/ratelimit'
-import { Redis } from '@upstash/redis'
 
 // ── Upstash Redis sliding-window rate limiter (20 req/min per user) ─────────
 // Durable across serverless cold starts; no GC needed.
@@ -71,12 +88,23 @@ function getCandidateModels(): string[] {
 async function callGemini(
   body: { contents: object[] },
   key: string,
-  maxTokens = 800,
-  temp = 0.3,
-  responseMimeType?: 'application/json'
+  options: {
+    maxTokens?: number
+    temp?: number
+    responseMimeType?: 'application/json'
+    responseJsonSchema?: GeminiJsonSchema
+    thinkingBudget?: number
+  } = {}
 ): Promise<string> {
   let lastError: Error | null = null
   const candidateModels = getCandidateModels()
+  const {
+    maxTokens = 800,
+    temp = 0.3,
+    responseMimeType,
+    responseJsonSchema,
+    thinkingBudget = 0,
+  } = options
 
   for (const model of candidateModels) {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`
@@ -87,7 +115,7 @@ async function callGemini(
 
     // gemini-2.5 requires explicit thinkingBudget: 0 for non-thinking mode
     if (model.startsWith('gemini-2.5')) {
-      generationConfig.thinkingConfig = { thinkingBudget: 0 }
+      generationConfig.thinkingConfig = { thinkingBudget }
     }
 
     // Only request JSON mime type for models that support it
@@ -95,13 +123,16 @@ async function callGemini(
       generationConfig.responseMimeType = responseMimeType
     }
 
+    if (responseJsonSchema && !model.startsWith('gemini-1.0')) {
+      generationConfig.responseJsonSchema = responseJsonSchema
+    }
+
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ contents: body.contents, generationConfig }),
-        // FIX: add a 15-second timeout so a hung Gemini request doesn't block forever
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(12_000),
       })
 
       if (response.ok) {
@@ -129,6 +160,8 @@ async function callGemini(
         (response.status === 400 && (
           normalizedError.includes('thinking_budget') ||
           normalizedError.includes('response mime type') ||
+          normalizedError.includes('response_json_schema') ||
+          normalizedError.includes('response json schema') ||
           normalizedError.includes('not supported')
         ))
 
@@ -140,8 +173,9 @@ async function callGemini(
       // Non-retriable error (bad request, auth failure) — surface immediately
       throw new Error(`Gemini error from ${model}: ${errorText.slice(0, 400)}`)
     } catch (err) {
-      if (err instanceof Error && err.name === 'TimeoutError') {
-        lastError = new Error(`${model} timed out after 15s`)
+      if (isTransientFetchError(err)) {
+        const reason = err instanceof Error ? err.message : 'transient fetch failure'
+        lastError = new Error(`${model}: ${reason}`)
         continue
       }
       throw err  // re-throw non-timeout errors
@@ -154,9 +188,17 @@ async function callGemini(
 }
 
 // ── Safe JSON parser — strips code-fence wrappers Gemini sometimes adds ──────
-function parseJSON(raw: string): unknown {
-  const cleaned = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
-  return JSON.parse(cleaned)
+function isTransientFetchError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const message = err.message.toLowerCase()
+  return (
+    err.name === 'TimeoutError' ||
+    err.name === 'AbortError' ||
+    message.includes('fetch failed') ||
+    message.includes('network') ||
+    message.includes('socket') ||
+    message.includes('econnreset')
+  )
 }
 
 // ── Input sanitisation helpers ───────────────────────────────────────────────
@@ -168,6 +210,91 @@ function sanitize(text: string, maxLen: number): string {
 }
 
 // ── ALLOWED request types — rejects anything outside this set ────────────────
+function safeJson(value: unknown, maxLen = 2500): string {
+  try {
+    return JSON.stringify(value ?? {}).slice(0, maxLen)
+  } catch {
+    return '{}'
+  }
+}
+
+function getThinkingBudget(type: string): number {
+  const envKey = `GEMINI_THINKING_BUDGET_${type.toUpperCase()}`
+  const raw = process.env[envKey] ?? process.env.GEMINI_THINKING_BUDGET
+  const parsed = Number(raw)
+
+  if (!Number.isFinite(parsed) || parsed < 0) return 0
+  return Math.min(1024, Math.floor(parsed))
+}
+
+function parseAndValidate<T>(
+  raw: string,
+  validator: (value: unknown) => ValidationResult<T>
+): ValidationResult<T> {
+  try {
+    return validator(parseModelJson(raw))
+  } catch (error) {
+    return {
+      ok: false,
+      errors: [error instanceof Error ? error.message : 'Invalid JSON response.'],
+    }
+  }
+}
+
+function buildRepairText(label: string, raw: string, errors: string[]): string {
+  return [
+    `The previous ${label} response failed validation.`,
+    `Validation errors: ${validationSummary(errors)}`,
+    'Regenerate the answer. Return ONLY valid JSON matching the configured schema.',
+    `Previous response excerpt: ${sanitize(raw, 1200)}`,
+  ].join('\n')
+}
+
+async function generateValidatedJSON<T>(args: {
+  label: string
+  key: string
+  contents: object[]
+  schema: GeminiJsonSchema
+  validator: (value: unknown) => ValidationResult<T>
+  maxTokens: number
+  temp: number
+  thinkingBudget?: number
+  retryContents?: (raw: string, errors: string[]) => object[]
+}): Promise<T> {
+  const raw = await callGemini({ contents: args.contents }, args.key, {
+    maxTokens: args.maxTokens,
+    temp: args.temp,
+    responseMimeType: 'application/json',
+    responseJsonSchema: args.schema,
+    thinkingBudget: args.thinkingBudget,
+  })
+  const parsed = parseAndValidate(raw, args.validator)
+
+  if (parsed.ok) return parsed.value
+
+  console.warn(`[Gemini] ${args.label} validation failed; retrying once:`, validationSummary(parsed.errors))
+
+  const retryContents = args.retryContents?.(raw, parsed.errors) ?? args.contents
+  const retryRaw = await callGemini({ contents: retryContents }, args.key, {
+    maxTokens: args.maxTokens,
+    temp: Math.min(args.temp, 0.2),
+    responseMimeType: 'application/json',
+    responseJsonSchema: args.schema,
+    thinkingBudget: args.thinkingBudget,
+  })
+  const retryParsed = parseAndValidate(retryRaw, args.validator)
+
+  if (retryParsed.ok) return retryParsed.value
+
+  console.error(
+    `[Gemini] ${args.label} validation failed after retry:`,
+    validationSummary(retryParsed.errors),
+    '| Raw:',
+    retryRaw.slice(0, 300)
+  )
+  throw new Error('The AI returned an unexpected response format. Please try again.')
+}
+
 const ALLOWED_TYPES = new Set([
   'meal_analysis', 'workout_generation', 'coach_chat',
   'bmi_recommendations', 'daily_insight', 'meal_swap',
@@ -207,10 +334,10 @@ export async function POST(req: NextRequest) {
 
       if (imageFile) {
         // Validate MIME
-        const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif'])
+        const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
         if (!ALLOWED_IMAGE_TYPES.has(imageFile.type)) {
           return NextResponse.json(
-            { error: 'Unsupported image type. Use JPEG, PNG, WebP, or GIF.' },
+            { error: 'Unsupported image type. Use JPEG, PNG, or WebP.' },
             { status: 400 }
           )
         }
@@ -246,8 +373,43 @@ export async function POST(req: NextRequest) {
             },
           ]
 
-      const raw = await callGemini({ contents }, key, 600, 0.2, 'application/json')
-      const result = parseJSON(raw) as Record<string, unknown>
+      const raw = await callGemini({ contents }, key, {
+        maxTokens: 700,
+        temp: 0.15,
+        responseMimeType: 'application/json',
+        responseJsonSchema: photoMealAnalysisSchema,
+        thinkingBudget: getThinkingBudget('meal_analysis'),
+      })
+      let parsedPhoto = parseAndValidate(raw, validatePhotoMealAnalysis)
+
+      if (!parsedPhoto.ok) {
+        const retryContents = [
+          {
+            parts: [
+              ...((contents[0] as { parts: object[] }).parts),
+              { text: buildRepairText(imageFile ? 'photo meal analysis' : 'meal analysis', raw, parsedPhoto.errors) },
+            ],
+          },
+        ]
+        const retryRaw = await callGemini({ contents: retryContents }, key, {
+          maxTokens: 700,
+          temp: 0.15,
+          responseMimeType: 'application/json',
+          responseJsonSchema: photoMealAnalysisSchema,
+          thinkingBudget: getThinkingBudget('meal_analysis'),
+        })
+        parsedPhoto = parseAndValidate(retryRaw, validatePhotoMealAnalysis)
+      }
+
+      if (!parsedPhoto.ok) {
+        console.error('[Gemini] photo meal validation failed:', validationSummary(parsedPhoto.errors))
+        return NextResponse.json(
+          { error: 'The AI returned an unexpected response format. Please try again.' },
+          { status: 502 }
+        )
+      }
+
+      const result = parsedPhoto.value
 
       // Sanitise numeric outputs — prevent garbage values reaching the DB
       result.totalCalories = Math.max(0, Math.round(Number(result.totalCalories) || 0))
@@ -287,6 +449,8 @@ export async function POST(req: NextRequest) {
     let prompt = ''
     let maxTokens = 800
     let temp = 0.3
+    let schema: GeminiJsonSchema | null = null
+    let validator: ((value: unknown) => ValidationResult<unknown>) | null = null
 
     switch (type) {
       case 'meal_analysis': {
@@ -294,11 +458,14 @@ export async function POST(req: NextRequest) {
         if (!description) return NextResponse.json({ error: 'description is required.' }, { status: 400 })
         const ctx = payload.userContext ?? {}
         prompt = `You are a precise nutrition AI for VitalIQ. ONLY answer about food and nutrition. Do NOT answer unrelated questions.
-User health context: ${JSON.stringify(ctx)}
+User health context: ${safeJson(ctx)}
 Meal to analyze: "${description}"
-Return ONLY valid JSON (no extra text, no markdown):
-{"calories":integer,"proteinG":float,"carbsG":float,"fatG":float,"fibreG":float,"sugarG":float,"sodiumMg":float,"mealType":"breakfast|lunch|dinner|snack|pre_workout|post_workout","ingredients":["string"],"aiInsight":"one sentence about nutritional quality relevant to their goal","quality_score":integer_1_to_10}`
-        maxTokens = 500
+Return conservative estimates when portion size is unclear. Include item-level assumptions and confidence.
+Return ONLY valid JSON matching the configured schema.`
+        maxTokens = 700
+        temp = 0.2
+        schema = mealAnalysisSchema
+        validator = validateTextMealAnalysis
         break
       }
 
@@ -318,13 +485,16 @@ Return ONLY valid JSON (no extra text, no markdown):
           advanced: 'Advanced — compound movements, progressive overload, higher intensity',
         }[fitnessLevel] ?? 'Intermediate'
         prompt = `You are an expert personal trainer AI. ONLY provide workout programming. Do not stray into recipes, medical advice, or unrelated topics.
-User: ${JSON.stringify(uc)}
+User: ${safeJson(uc)}
 Readiness today: ${readinessScore}/100. Target intensity: ${intensity}
 ${equipmentNote}
 Fitness level: ${levelNote}
-Return ONLY valid JSON (no markdown):
-{"title":"string","sessionType":"push|pull|legs|full_body|cardio|hiit|yoga|rest","durationMins":integer,"estimatedCalories":integer,"coachNote":"string (max 30 words)","exercises":[{"name":"string","sets":integer,"repsOrDuration":"string","restSec":integer,"weight":"string","tip":"string (max 15 words)"}]}`
+Rules: 3-8 exercises. Avoid max-effort/PR language. If readiness is under 50, avoid HIIT and keep the session light.
+Return ONLY valid JSON matching the configured schema.`
         maxTokens = 1500
+        temp = 0.25
+        schema = workoutGenerationSchema
+        validator = (value: unknown) => validateWorkoutGeneration(value, { bodyweightOnly: isBodyweight, readinessScore })
         break
       }
 
@@ -334,19 +504,23 @@ Return ONLY valid JSON (no markdown):
         if (!question) return NextResponse.json({ error: 'question is required.' }, { status: 400 })
         const history = (Array.isArray(payload.chatHistory) ? payload.chatHistory : [])
           .slice(-COACH_HISTORY_LIMIT)
-          .map((m: { role: string; content: string }) => `${m.role}: ${sanitize(String(m.content), 300)}`)
+          .map((m: { role?: string; content?: string }) => {
+            const role = m.role === 'ai' ? 'assistant' : 'user'
+            return `${role}: ${sanitize(String(m.content ?? ''), 300)}`
+          })
           .join('\n')
         const hydrationNote = typeof (uc as { glassesToday?: number }).glassesToday === 'number'
           ? ` Hydration today: ${(uc as { glassesToday: number }).glassesToday} glasses of water.`
           : ''
         prompt = `You are VitalIQ Coach — a warm, knowledgeable, data-driven health and fitness coach.
 STRICT SCOPE: Only answer questions about nutrition, fitness, sleep, recovery, mental wellbeing, hydration, and general health. If asked anything outside this scope (politics, coding, shopping, etc.) politely decline and redirect to their health goals.
-User health data: ${JSON.stringify(uc)}${hydrationNote}
+Safety: Do not diagnose disease, prescribe medication, or replace a clinician. For chest pain, severe shortness of breath, fainting, suicidal thoughts, eating-disorder behavior, severe injury, or other urgent symptoms, advise immediate professional or emergency help.
+User health data: ${safeJson(uc)}${hydrationNote}
 Recent chat history:
 ${history}
 User question: "${question}"
-Rules: max 120 words. Be conversational. Use plain text only. Do not use markdown, bold markers, asterisks, or code formatting. If you give steps, put each step on its own new line. Reference their actual metrics where relevant. Give one specific actionable recommendation. If data is missing, suggest they log it.`
-        temp = 0.75
+Rules: max 120 words. Be conversational. Use plain text only. Do not use markdown, bold markers, asterisks, or code formatting. If you give steps, put each step on its own new line. Reference only metrics present in the user data. Give one specific actionable recommendation. If data is missing, suggest they log it.`
+        temp = 0.55
         maxTokens = 300  // FIX: was unlimited — cap coach responses at 300 tokens
         break
       }
@@ -359,6 +533,9 @@ User: BMI ${profile.bmi} (${profile.bmiCategory}), age ${profile.age}, sex ${pro
 Give exactly 4 short, actionable, non-judgmental recommendations covering: (1) training (2) diet (3) hydration (4) daily habit.
 Return ONLY a JSON array of exactly 4 strings. No markdown, no extra keys.`
         maxTokens = 600
+        temp = 0.25
+        schema = bmiRecommendationsSchema
+        validator = validateBmiRecommendations
         break
       }
 
@@ -366,10 +543,12 @@ Return ONLY a JSON array of exactly 4 strings. No markdown, no extra keys.`
         const { userContext: uc2, readiness } = payload as { userContext: unknown; readiness: { score: number; pillars: unknown } }
         if (!readiness) return NextResponse.json({ error: 'readiness is required.' }, { status: 400 })
         prompt = `You are a VitalIQ health intelligence engine. ONLY generate insights about the user's health data.
-User: ${JSON.stringify(uc2)}, Readiness: ${readiness.score}/100, Pillar scores: ${JSON.stringify(readiness.pillars)}
-Return ONLY valid JSON:
-{"headline":"max 12 words","body":"2-3 sentences referencing their actual data","actionable":"one specific thing to do today","pillarsUsed":["sleep","nutrition"]}`
+User: ${safeJson(uc2)}, Readiness: ${readiness.score}/100, Pillar scores: ${safeJson(readiness.pillars)}
+Use only data present in the input. Return ONLY valid JSON matching the configured schema.`
         maxTokens = 400
+        temp = 0.25
+        schema = dailyInsightSchema
+        validator = validateDailyInsight
         break
       }
 
@@ -380,20 +559,22 @@ Return ONLY valid JSON:
         if (!meal) return NextResponse.json({ error: 'meal is required.' }, { status: 400 })
         prompt = `You are a nutrition AI for VitalIQ. ONLY answer about food and nutrition.
 Suggest 2 healthier alternatives to: "${meal}". User goal: ${goal}. Preferences: ${prefs}.
-Return ONLY valid JSON:
-{"swaps":[{"name":"string","reason":"string (max 15 words)","calories":number,"proteinG":float},{"name":"string","reason":"string (max 15 words)","calories":number,"proteinG":float}]}`
+Return ONLY valid JSON matching the configured schema.`
         maxTokens = 400
+        temp = 0.25
+        schema = mealSwapSchema
+        validator = validateMealSwap
         break
       }
     }
 
-    const raw = await callGemini(
-      { contents: [{ parts: [{ text: prompt }] }] },
-      key,
-      maxTokens,
-      temp,
-      type === 'coach_chat' ? undefined : 'application/json'
-    )
+    const raw = type === 'coach_chat'
+      ? await callGemini(
+          { contents: [{ parts: [{ text: prompt }] }] },
+          key,
+          { maxTokens, temp, thinkingBudget: getThinkingBudget(type) }
+        )
+      : ''
 
     // Coach chat — plain text response
     if (type === 'coach_chat') {
@@ -406,8 +587,31 @@ Return ONLY valid JSON:
 
     // JSON response with graceful parsing fallback
     try {
-      return NextResponse.json({ result: parseJSON(raw) })
-    } catch {
+      if (!schema || !validator) {
+        return NextResponse.json({ error: `No schema configured for request type: ${type}` }, { status: 500 })
+      }
+
+      const result = await generateValidatedJSON({
+        label: type,
+        key,
+        contents: [{ parts: [{ text: prompt }] }],
+        schema,
+        validator,
+        maxTokens,
+        temp,
+        thinkingBudget: getThinkingBudget(type),
+        retryContents: (failedRaw, errors) => [
+          {
+            parts: [{ text: `${prompt}\n\n${buildRepairText(type, failedRaw, errors)}` }],
+          },
+        ],
+      })
+
+      return NextResponse.json({ result })
+    } catch (error) {
+      if (error instanceof Error && (error.message.includes('No Gemini model responded') || error.message.includes('GEMINI_API_KEY'))) {
+        throw error
+      }
       // Gemini returned non-JSON — log it and surface a user-friendly error
       console.error('[Gemini] JSON parse failed for type:', type, '| Raw:', raw.slice(0, 200))
       return NextResponse.json(

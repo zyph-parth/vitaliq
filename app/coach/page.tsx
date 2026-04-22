@@ -377,6 +377,8 @@ export default function CoachPage() {
         }),
       })
 
+      const data = await response.json().catch(() => ({}))
+
       if (status === 'authenticated' && !response.ok && response.status === 429) {
         setMessages((current) => [
           ...current,
@@ -390,7 +392,10 @@ export default function CoachPage() {
         return
       }
 
-      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data?.error || 'Coach response failed')
+      }
+
       const reply = data.result || "I'm here to help. Could you rephrase that?"
 
       setMessages((current) => [
@@ -409,7 +414,7 @@ export default function CoachPage() {
           id: nextId(),
           role: 'ai',
           content:
-            "I'm having trouble connecting right now. Make sure your Gemini API key is configured in .env.local.",
+            "I'm having trouble connecting right now. Please try again in a moment.",
           time: format(new Date(), 'HH:mm'),
         },
       ])

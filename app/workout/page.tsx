@@ -486,9 +486,14 @@ export default function WorkoutPage() {
           },
         }),
       })
-      const data = await res.json()
-      if (data.result && data.result.exercises?.length > 0) {
-        setWorkoutSession({ ...(data.result as WorkoutSession), source: 'ai' })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data?.error || 'Workout generation failed')
+      }
+
+      const candidate = data.result as WorkoutSession | undefined
+      if (candidate && Array.isArray(candidate.exercises) && candidate.exercises.length > 0) {
+        setWorkoutSession({ ...candidate, source: 'ai' })
         setCompletedSets({})
         setTimer(0)
         setGenerating(false)

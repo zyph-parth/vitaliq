@@ -52,6 +52,8 @@ interface FoodResult {
   fibreG: number
   aiInsight?: string
   mealType?: string
+  confidence?: number
+  assumptions?: string[]
   items: { name: string; portion: string; calories: number }[]
 }
 
@@ -164,22 +166,27 @@ export default function NutritionPage() {
         throw new Error(data?.error || 'Could not analyze this meal.')
       }
       const parsed = data.result
+      const items = Array.isArray(parsed.items) && parsed.items.length > 0
+        ? parsed.items
+        : (Array.isArray(parsed.ingredients) ? parsed.ingredients : []).map((ingredient: string) => ({
+            name: ingredient,
+            portion: '',
+            calories: 0,
+          }))
       // UX 1: Store mealType from AI response
       setAnalysisResult({
-        foodName: text.slice(0, 60),
+        foodName: parsed.foodName || text.slice(0, 60),
         emoji: 'ME',
-        totalCalories: parsed.calories,
-        proteinG: parsed.proteinG,
-        carbsG: parsed.carbsG,
-        fatG: parsed.fatG,
-        fibreG: parsed.fibreG,
+        totalCalories: Number(parsed.calories) || 0,
+        proteinG: Number(parsed.proteinG) || 0,
+        carbsG: Number(parsed.carbsG) || 0,
+        fatG: Number(parsed.fatG) || 0,
+        fibreG: Number(parsed.fibreG) || 0,
         aiInsight: parsed.aiInsight,
         mealType: parsed.mealType || 'snack',
-        items: (parsed.ingredients || []).map((ingredient: string) => ({
-          name: ingredient,
-          portion: '',
-          calories: 0,
-        })),
+        confidence: typeof parsed.confidence === 'number' ? parsed.confidence : undefined,
+        assumptions: Array.isArray(parsed.assumptions) ? parsed.assumptions : [],
+        items,
       })
     } catch (error) {
       setAiMessage(error instanceof Error ? error.message : 'Could not analyze this meal.')
@@ -205,7 +212,17 @@ export default function NutritionPage() {
       if (!response.ok) {
         throw new Error(data?.error || 'Photo analysis failed.')
       }
-      setAnalysisResult(data.result)
+      setAnalysisResult({
+        ...data.result,
+        totalCalories: Number(data.result?.totalCalories) || 0,
+        proteinG: Number(data.result?.proteinG) || 0,
+        carbsG: Number(data.result?.carbsG) || 0,
+        fatG: Number(data.result?.fatG) || 0,
+        fibreG: Number(data.result?.fibreG) || 0,
+        mealType: data.result?.mealType || 'snack',
+        assumptions: Array.isArray(data.result?.assumptions) ? data.result.assumptions : [],
+        items: Array.isArray(data.result?.items) ? data.result.items : [],
+      })
     } catch (error) {
       setAiMessage(error instanceof Error ? error.message : 'Photo analysis failed.')
       setAiMessageIsError(true)
@@ -523,6 +540,11 @@ export default function NutritionPage() {
                       {analysisResult.aiInsight && (
                         <p className="mt-2 max-w-sm text-sm leading-6 text-[#166534]">{analysisResult.aiInsight}</p>
                       )}
+                      {typeof analysisResult.confidence === 'number' && (
+                        <div className="mt-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6b7280]">
+                          Confidence {Math.round(analysisResult.confidence * 100)}%
+                        </div>
+                      )}
                     </div>
                     <div className="rounded-2xl bg-[#f0fdf4] px-4 py-3 text-right flex-shrink-0">
                       <div className="font-display text-[1.8rem] font-semibold text-[#166534]">{analysisResult.totalCalories}</div>
@@ -562,6 +584,12 @@ export default function NutritionPage() {
                           {item.name}
                         </span>
                       ))}
+                    </div>
+                  )}
+
+                  {analysisResult.assumptions && analysisResult.assumptions.length > 0 && (
+                    <div className="mt-4 rounded-2xl bg-[#f8fafc] px-3 py-2 text-xs leading-6 text-[#64748b]">
+                      Based on {analysisResult.assumptions.slice(0, 2).join('; ')}
                     </div>
                   )}
 
