@@ -5,8 +5,16 @@ import { useEffect, useState } from 'react'
 import { useSession } from 'next-auth/react'
 import AppShell from '@/components/layout/AppShell'
 import { Card, SectionHeader, Button } from '@/components/ui'
+import { validateWorkoutGeneration } from '@/lib/llm-validation'
 import { withTimeZone } from '@/lib/client-time'
 import { useDashboard } from '@/lib/useDashboard'
+import {
+  getElapsedWorkoutSeconds,
+  getWorkoutStartedAtIso,
+  parseWorkoutRepsOrDuration,
+  parseWorkoutWeightKg,
+  recoverWorkoutTimerState,
+} from '@/lib/workout-utils'
 import { clsx } from 'clsx'
 
 interface Exercise {
@@ -14,6 +22,7 @@ interface Exercise {
   sets: number
   repsOrDuration: string
   weight: string
+  restSec?: number
   tip?: string
 }
 
@@ -46,6 +55,7 @@ interface WorkoutDraft {
   completedSets: Record<string, boolean>
   timer: number
   timerRunning: boolean
+  timerStartedAtMs: number | null
   savedAt: number
 }
 
@@ -57,12 +67,13 @@ interface WorkoutExercisePayload {
   durationSec?: number
   weight: string
   weightKg?: number
+  restSec?: number
   tip?: string
   completedSets: boolean[]
 }
 
-const WORKOUT_DRAFT_STORAGE_PREFIX = 'vitaliq:workout-draft:v1:'
-const WORKOUT_DRAFT_VERSION = 1
+const WORKOUT_DRAFT_STORAGE_PREFIX = 'vitaliq:workout-draft:v2:'
+const WORKOUT_DRAFT_VERSION = 2
 
 const ENVIRONMENTS: { id: Environment; icon: string; label: string; desc: string }[] = [
   { id: 'home',    icon: '🏠', label: 'Home',    desc: 'Bodyweight, bands, dumbbells' },
@@ -124,7 +135,7 @@ const FALLBACK_SESSIONS: Record<Environment, Record<FitnessLevel, WorkoutSession
       sessionType: 'hiit',
       durationMins: 50,
       estimatedCalories: 480,
-      coachNote: 'Maximum effort intervals. 40s on, 20s rest per exercise. This is intended to be hard.',
+      coachNote: 'Hard intervals with clean form. Work around an 8/10 effort and keep each round sharp.',
       exercises: [
         { name: 'Burpees',            sets: 4, repsOrDuration: '40 seconds', weight: 'bodyweight', tip: 'Full pushup at bottom, explosive jump at top' },
         { name: 'Pistol Squat (assisted)', sets: 3, repsOrDuration: '6 each leg', weight: 'bodyweight', tip: 'Use a door frame for balance if needed' },
@@ -161,7 +172,7 @@ const FALLBACK_SESSIONS: Record<Environment, Record<FitnessLevel, WorkoutSession
         { name: 'Tempo Run',          sets: 1, repsOrDuration: '15 minutes', weight: 'bodyweight', tip: '80% effort — breathing hard but controlled' },
         { name: 'Park Push-ups',      sets: 3, repsOrDuration: '15 reps',    weight: 'bodyweight', tip: 'Ground level, full range of motion' },
         { name: 'Bulgarian Split Squats (park bench)', sets: 3, repsOrDuration: '10 each leg', weight: 'bodyweight', tip: 'Rear foot elevated, knee tracks over toes' },
-        { name: 'Sprint Intervals',   sets: 5, repsOrDuration: '20s sprint / 40s walk', weight: 'bodyweight', tip: 'Maximum effort on sprints, full recovery' },
+        { name: 'Sprint Intervals',   sets: 5, repsOrDuration: '20s sprint / 40s walk', weight: 'bodyweight', tip: 'Run fast but controlled, then fully recover' },
       ],
     },
     advanced: {
@@ -169,9 +180,9 @@ const FALLBACK_SESSIONS: Record<Environment, Record<FitnessLevel, WorkoutSession
       sessionType: 'hiit',
       durationMins: 55,
       estimatedCalories: 560,
-      coachNote: 'High-intensity field training. Attack each block hard. Judge by your readiness — today is a go.',
+      coachNote: 'Athletic field session with strong but controlled output. Leave one gear in reserve and stay crisp.',
       exercises: [
-        { name: '5K Run (timed)',     sets: 1, repsOrDuration: 'best effort', weight: 'bodyweight', tip: 'First km easy, middle kms at 85%, finish strong' },
+        { name: 'Run Intervals',      sets: 5, repsOrDuration: '2 min fast / 1 min walk', weight: 'bodyweight', tip: 'Open controlled, then hold a strong repeatable pace' },
         { name: 'Explosive Push-ups', sets: 4, repsOrDuration: '10 reps',    weight: 'bodyweight', tip: 'Hands leave floor at top — clap optional' },
         { name: 'Box Jumps (bench)',  sets: 4, repsOrDuration: '8 reps',     weight: 'bodyweight', tip: 'Soft landing, step down (not jump)' },
         { name: 'Broad Jumps',        sets: 4, repsOrDuration: '6 reps',     weight: 'bodyweight', tip: 'Max horizontal distance each rep' },
@@ -199,11 +210,11 @@ const FALLBACK_SESSIONS: Record<Environment, Record<FitnessLevel, WorkoutSession
       sessionType: 'push',
       durationMins: 55,
       estimatedCalories: 400,
-      coachNote: 'Solid readiness — moderate to high intensity. Rest 90s between working sets.',
+      coachNote: 'Solid readiness for a strong strength session. Keep rest disciplined and every rep clean.',
       exercises: [
-        { name: 'Bench Press',        sets: 4, repsOrDuration: '8 reps',  weight: '70% 1RM', tip: 'Retract scapula, drive through feet' },
+        { name: 'Bench Press',        sets: 4, repsOrDuration: '8 reps',  weight: 'challenging load', tip: 'Retract scapula, drive through feet' },
         { name: 'Incline DB Press',   sets: 3, repsOrDuration: '10 reps', weight: '24kg',    tip: 'Control the eccentric (lower slowly)' },
-        { name: 'Overhead Press',     sets: 4, repsOrDuration: '8 reps',  weight: '50% 1RM', tip: 'Brace core, bar path straight up' },
+        { name: 'Overhead Press',     sets: 4, repsOrDuration: '8 reps',  weight: 'moderate-heavy', tip: 'Brace core, bar path straight up' },
         { name: 'Cable Lateral Raise', sets: 3, repsOrDuration: '15 reps', weight: 'light',  tip: 'Slight forward lean, lead with elbows' },
         { name: 'Tricep Pushdown',    sets: 3, repsOrDuration: '12 reps', weight: '30kg',    tip: 'Elbows pinned, only forearm moves' },
       ],
@@ -213,16 +224,61 @@ const FALLBACK_SESSIONS: Record<Environment, Record<FitnessLevel, WorkoutSession
       sessionType: 'push',
       durationMins: 70,
       estimatedCalories: 520,
-      coachNote: 'Readiness is high — push compound lifts to 85–90% intensity. Volume day.',
+      coachNote: 'Readiness is high for challenging compound work. Push the quality, but keep a little margin in reserve.',
       exercises: [
-        { name: 'Barbell Squat',      sets: 5, repsOrDuration: '5 reps',  weight: '80% 1RM', tip: 'Break at hips first, brace hard' },
-        { name: 'Paused Bench Press', sets: 4, repsOrDuration: '6 reps',  weight: '75% 1RM', tip: '1s pause on chest, explosive drive' },
+        { name: 'Barbell Squat',      sets: 5, repsOrDuration: '5 reps',  weight: 'challenging load', tip: 'Break at hips first, brace hard' },
+        { name: 'Paused Bench Press', sets: 4, repsOrDuration: '6 reps',  weight: 'challenging load', tip: '1s pause on chest, explosive drive' },
         { name: 'Weighted Dips',      sets: 4, repsOrDuration: '8 reps',  weight: '+15kg',   tip: 'Slight forward lean for chest focus' },
         { name: 'DB Incline Flyes',   sets: 3, repsOrDuration: '12 reps', weight: '18kg',    tip: 'Long arc, slight bend in elbows' },
         { name: 'Face Pulls',         sets: 3, repsOrDuration: '20 reps', weight: 'light',   tip: 'Protects shoulder health, never skip' },
         { name: 'Skull Crushers',     sets: 3, repsOrDuration: '10 reps', weight: '20kg',    tip: 'Elbows stationary, lower to forehead' },
       ],
     },
+  },
+}
+
+const LOW_READINESS_FALLBACKS: Record<Environment, WorkoutSession> = {
+  home: {
+    title: 'Home Recovery Reset',
+    sessionType: 'yoga',
+    durationMins: 25,
+    estimatedCalories: 120,
+    coachNote: 'Readiness is lower today. Keep the effort light, move smoothly, and finish feeling better than you started.',
+    exercises: [
+      { name: 'Cat-Cow Flow', sets: 2, repsOrDuration: '60 seconds', weight: 'bodyweight', restSec: 20, tip: 'Move slowly with your breath.' },
+      { name: 'Dead Bug', sets: 3, repsOrDuration: '8 each side', weight: 'bodyweight', restSec: 30, tip: 'Keep your lower back gently braced.' },
+      { name: 'Glute Bridge', sets: 3, repsOrDuration: '12 reps', weight: 'bodyweight', restSec: 30, tip: 'Pause briefly at the top.' },
+      { name: 'Child\'s Pose', sets: 2, repsOrDuration: '45 seconds', weight: 'bodyweight', restSec: 15, tip: 'Relax your shoulders and jaw.' },
+      { name: 'Easy Walk', sets: 1, repsOrDuration: '5 minutes', weight: 'bodyweight', restSec: 0, tip: 'Use an easy, nasal-breathing pace.' },
+    ],
+  },
+  outdoor: {
+    title: 'Outdoor Recovery Walk',
+    sessionType: 'cardio',
+    durationMins: 35,
+    estimatedCalories: 180,
+    coachNote: 'Lower readiness calls for easy aerobic work today. Keep the pace conversational and stay loose.',
+    exercises: [
+      { name: 'Easy Walk', sets: 1, repsOrDuration: '20 minutes', weight: 'bodyweight', restSec: 0, tip: 'Keep your stride relaxed and smooth.' },
+      { name: 'Walking Lunges', sets: 2, repsOrDuration: '8 each leg', weight: 'bodyweight', restSec: 30, tip: 'Take controlled steps and stay upright.' },
+      { name: 'Bench Incline Push-ups', sets: 2, repsOrDuration: '10 reps', weight: 'bodyweight', restSec: 45, tip: 'Stop a rep before form slows down.' },
+      { name: 'Calf Raises', sets: 2, repsOrDuration: '15 reps', weight: 'bodyweight', restSec: 20, tip: 'Use a full range and steady tempo.' },
+      { name: 'Cool-down Walk', sets: 1, repsOrDuration: '5 minutes', weight: 'bodyweight', restSec: 0, tip: 'Let your breathing settle fully.' },
+    ],
+  },
+  gym: {
+    title: 'Gym Recovery Circuit',
+    sessionType: 'full_body',
+    durationMins: 40,
+    estimatedCalories: 220,
+    coachNote: 'Today is about quality movement, not pushing load. Keep every set light and crisp.',
+    exercises: [
+      { name: 'Bike Warm-up', sets: 1, repsOrDuration: '5 minutes', weight: 'bodyweight', restSec: 0, tip: 'Stay at an easy spin pace.' },
+      { name: 'Goblet Squat', sets: 2, repsOrDuration: '10 reps', weight: 'light', restSec: 45, tip: 'Move with full control and depth.' },
+      { name: 'Seated Cable Row', sets: 2, repsOrDuration: '12 reps', weight: 'light', restSec: 45, tip: 'Pause briefly with your shoulder blades back.' },
+      { name: 'Walking Lunges', sets: 2, repsOrDuration: '8 each leg', weight: 'bodyweight', restSec: 45, tip: 'Take deliberate, stable steps.' },
+      { name: 'Bike Cool-down', sets: 1, repsOrDuration: '8 minutes', weight: 'bodyweight', restSec: 0, tip: 'Finish at a very easy effort.' },
+    ],
   },
 }
 
@@ -240,57 +296,32 @@ function buildWorkoutDraftKey(userKey: string) {
   return `${WORKOUT_DRAFT_STORAGE_PREFIX}${userKey}`
 }
 
-function parseRepsOrDuration(value: string) {
-  const text = value.trim().toLowerCase()
-
-  const minuteMatch = text.match(/(\d+(?:\.\d+)?)\s*(min|mins|minute|minutes)\b/)
-  if (minuteMatch) {
-    return { reps: null, durationSec: Math.round(Number(minuteMatch[1]) * 60), isAmrap: false }
+function cloneWorkoutSession(session: WorkoutSession): WorkoutSession {
+  return {
+    ...session,
+    exercises: session.exercises.map((exercise) => ({ ...exercise })),
   }
-
-  const secondMatch = text.match(/(\d+(?:\.\d+)?)\s*(sec|secs|second|seconds|s)\b/)
-  if (secondMatch) {
-    return { reps: null, durationSec: Math.round(Number(secondMatch[1])), isAmrap: false }
-  }
-
-  const setMatch = text.match(/(\d+)\s*[x\u00D7]\s*\d+/)
-  if (setMatch) {
-    return { reps: parseInt(setMatch[1], 10), durationSec: null, isAmrap: false }
-  }
-
-  const repMatch = text.match(/(\d+(?:\.\d+)?)\s*reps?\b/)
-  if (repMatch) {
-    return { reps: Math.round(Number(repMatch[1])), durationSec: null, isAmrap: false }
-  }
-
-  const eachMatch = text.match(/(\d+(?:\.\d+)?)\s*each\b/)
-  if (eachMatch) {
-    return { reps: Math.round(Number(eachMatch[1])), durationSec: null, isAmrap: false }
-  }
-
-  if (text.includes('amrap')) {
-    return { reps: null, durationSec: null, isAmrap: true }
-  }
-
-  console.warn('[VitalIQ] Unrecognized repsOrDuration format:', value)
-  return { reps: null, durationSec: null, isAmrap: false }
 }
 
-function parseWeightKg(value: string) {
-  const text = value.trim().toLowerCase()
-  if (!text || text === 'bodyweight' || text === 'light') return undefined
+function getFallbackWorkoutSession(
+  environment: Environment,
+  fitnessLevel: FitnessLevel,
+  readinessScore: number
+): WorkoutSession {
+  const session = readinessScore < 50
+    ? LOW_READINESS_FALLBACKS[environment]
+    : FALLBACK_SESSIONS[environment][fitnessLevel]
 
-  const numberMatch = text.match(/-?\d+(?:\.\d+)?/)
-  return numberMatch ? Number(numberMatch[0]) : undefined
+  return { ...cloneWorkoutSession(session), source: 'fallback' }
 }
 
 function buildWorkoutPayload(
   workoutSession: WorkoutSession,
   completedSets: Record<string, boolean>,
-  timer: number
+  elapsedSeconds: number
 ) {
-  const actualDurationMins = timer > 0 ? Math.max(1, Math.round(timer / 60)) : workoutSession.durationMins
-  const startedAt = timer > 0 ? new Date(Date.now() - (timer * 1000)).toISOString() : undefined
+  const actualDurationMins = elapsedSeconds > 0 ? Math.max(1, Math.round(elapsedSeconds / 60)) : workoutSession.durationMins
+  const startedAt = getWorkoutStartedAtIso(elapsedSeconds)
 
   return {
     title: workoutSession.title,
@@ -302,7 +333,7 @@ function buildWorkoutPayload(
     startedAt,
     completedAt: new Date().toISOString(),
     exercises: workoutSession.exercises.map<WorkoutExercisePayload>((exercise, exerciseIdx) => {
-      const parsed = parseRepsOrDuration(exercise.repsOrDuration)
+      const parsed = parseWorkoutRepsOrDuration(exercise.repsOrDuration)
 
       return {
         name: exercise.name,
@@ -311,7 +342,8 @@ function buildWorkoutPayload(
         reps: parsed.reps ?? undefined,
         durationSec: parsed.durationSec ?? undefined,
         weight: exercise.weight,
-        weightKg: parseWeightKg(exercise.weight),
+        weightKg: parseWorkoutWeightKg(exercise.weight) ?? undefined,
+        restSec: exercise.restSec,
         tip: exercise.tip,
         completedSets: Array.from({ length: exercise.sets }, (_, setIdx) =>
           Boolean(completedSets[`${exerciseIdx}-${setIdx}`])
@@ -330,6 +362,7 @@ export default function WorkoutPage() {
   const [completedSets, setCompletedSets] = useState<Record<string, boolean>>({})
   const [timer, setTimer] = useState(0)
   const [timerRunning, setTimerRunning] = useState(false)
+  const [timerStartedAtMs, setTimerStartedAtMs] = useState<number | null>(null)
   const [userProfile, setUserProfile] = useState<UserProfile>(DEFAULT_PROFILE)
   const [environment, setEnvironment] = useState<Environment>('home')
   const [fitnessLevel, setFitnessLevel] = useState<FitnessLevel>('intermediate')
@@ -337,8 +370,8 @@ export default function WorkoutPage() {
   const [draftReady, setDraftReady] = useState(false)
   const [restoredDraft, setRestoredDraft] = useState(false)
 
-  const draftStorageKey = session?.user?.email || session?.user?.name
-    ? buildWorkoutDraftKey(String(session?.user?.email ?? session?.user?.name))
+  const draftStorageKey = session?.user?.id
+    ? buildWorkoutDraftKey(String(session.user.id))
     : null
 
   // UX 5: use shared dashboard hook — pre-filled from cache, no extra fetch
@@ -384,12 +417,11 @@ export default function WorkoutPage() {
       setWorkoutSession(draft.workoutSession)
       setCompletedSets(draft.workoutSession ? draft.completedSets ?? {} : {})
 
-      const recoveredTimer = draft.timerRunning
-        ? (draft.timer ?? 0) + Math.max(0, Math.floor((Date.now() - draft.savedAt) / 1000))
-        : (draft.timer ?? 0)
+      const recoveredTimerState = recoverWorkoutTimerState(draft)
 
-      setTimer(recoveredTimer)
-      setTimerRunning(Boolean(draft.workoutSession && draft.timerRunning))
+      setTimer(recoveredTimerState.timer)
+      setTimerRunning(Boolean(draft.workoutSession && recoveredTimerState.timerRunning))
+      setTimerStartedAtMs(draft.workoutSession ? recoveredTimerState.timerStartedAtMs : null)
       setRestoredDraft(Boolean(draft.workoutSession))
     } catch {
       window.sessionStorage.removeItem(draftStorageKey)
@@ -399,10 +431,24 @@ export default function WorkoutPage() {
   }, [draftStorageKey, status])
 
   useEffect(() => {
-    if (!timerRunning) return
-    const interval = setInterval(() => setTimer(t => t + 1), 1000)
-    return () => clearInterval(interval)
-  }, [timerRunning])
+    if (!timerRunning || timerStartedAtMs == null) return
+
+    const syncTimer = () => {
+      setTimer(getElapsedWorkoutSeconds(0, true, timerStartedAtMs))
+    }
+
+    syncTimer()
+
+    const interval = window.setInterval(syncTimer, 1000)
+    window.addEventListener('visibilitychange', syncTimer)
+    window.addEventListener('focus', syncTimer)
+
+    return () => {
+      window.clearInterval(interval)
+      window.removeEventListener('visibilitychange', syncTimer)
+      window.removeEventListener('focus', syncTimer)
+    }
+  }, [timerRunning, timerStartedAtMs])
 
   useEffect(() => {
     if (!draftReady || typeof window === 'undefined' || !draftStorageKey) return
@@ -419,8 +465,9 @@ export default function WorkoutPage() {
       fitnessLevel,
       workoutSession,
       completedSets: workoutSession ? completedSets : {},
-      timer,
+      timer: getElapsedWorkoutSeconds(timer, timerRunning, timerStartedAtMs),
       timerRunning: Boolean(workoutSession && timerRunning),
+      timerStartedAtMs: workoutSession && timerRunning ? timerStartedAtMs : null,
       savedAt: Date.now(),
     }
 
@@ -433,6 +480,7 @@ export default function WorkoutPage() {
     fitnessLevel,
     timer,
     timerRunning,
+    timerStartedAtMs,
     workoutSession,
   ])
 
@@ -445,11 +493,37 @@ export default function WorkoutPage() {
     return 'full gym (barbells, machines, cables)'
   }
 
-  const resetWorkout = () => {
-    setWorkoutSession(null)
-    setCompletedSets({})
+  const resetTimerState = () => {
     setTimer(0)
     setTimerRunning(false)
+    setTimerStartedAtMs(null)
+  }
+
+  const toggleTimer = () => {
+    if (timerRunning) {
+      setTimer(getElapsedWorkoutSeconds(timer, true, timerStartedAtMs))
+      setTimerRunning(false)
+      setTimerStartedAtMs(null)
+      return
+    }
+
+    setTimerStartedAtMs(Date.now() - Math.max(0, Math.floor(timer)) * 1000)
+    setTimerRunning(true)
+  }
+
+  const hasInProgressWorkout = Boolean(workoutSession) && (timerRunning || timer > 0 || Object.values(completedSets).some(Boolean))
+  const canReplaceWorkout = () => {
+    if (!hasInProgressWorkout || typeof window === 'undefined') return true
+
+    return window.confirm('Generate a new workout? Your current timer and completed sets will be cleared.')
+  }
+
+  const resetWorkout = (options?: { force?: boolean }) => {
+    if (!options?.force && !canReplaceWorkout()) return
+
+    setWorkoutSession(null)
+    setCompletedSets({})
+    resetTimerState()
     setRestoredDraft(false)
     setCompletionError(null)
 
@@ -459,12 +533,12 @@ export default function WorkoutPage() {
   }
 
   const generateWorkout = async () => {
-    if (generating) return
+    if (generating || !readyForGeneration || !dashboard?.user || !dashboard?.readiness) return
+    if (!canReplaceWorkout()) return
 
     setGenerating(true)
     setCompletionError(null)
     setRestoredDraft(false)
-    setTimerRunning(false)
 
     try {
       const res = await fetch('/api/gemini', {
@@ -492,32 +566,38 @@ export default function WorkoutPage() {
       }
 
       const candidate = data.result as WorkoutSession | undefined
-      if (candidate && Array.isArray(candidate.exercises) && candidate.exercises.length > 0) {
-        setWorkoutSession({ ...candidate, source: 'ai' })
+      const validatedCandidate = validateWorkoutGeneration(candidate, {
+        bodyweightOnly: environment !== 'gym',
+        readinessScore: userProfile.readinessScore,
+      })
+
+      if (validatedCandidate.ok) {
+        setWorkoutSession({ ...validatedCandidate.value, source: 'ai' })
         setCompletedSets({})
-        setTimer(0)
+        resetTimerState()
         setGenerating(false)
         return
       }
     } catch { /* fall through to fallback */ }
 
-    setWorkoutSession({ ...FALLBACK_SESSIONS[environment][fitnessLevel], source: 'fallback' })
+    setWorkoutSession(getFallbackWorkoutSession(environment, fitnessLevel, userProfile.readinessScore))
     setCompletedSets({})
-    setTimer(0)
+    resetTimerState()
     setGenerating(false)
   }
 
   const completeWorkout = async () => {
-    if (!workoutSession) return
+    if (!workoutSession || completedCount === 0) return
 
     setSavingCompletion(true)
     setCompletionError(null)
 
     try {
+      const elapsedSeconds = getElapsedWorkoutSeconds(timer, timerRunning, timerStartedAtMs)
       const saveRes = await fetch(withTimeZone('/api/workouts'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(buildWorkoutPayload(workoutSession, completedSets, timer)),
+        body: JSON.stringify(buildWorkoutPayload(workoutSession, completedSets, elapsedSeconds)),
       })
 
       if (!saveRes.ok) {
@@ -525,7 +605,7 @@ export default function WorkoutPage() {
       }
 
       clearDashboard()
-      resetWorkout()
+      resetWorkout({ force: true })
     } catch {
       setCompletionError('We could not save this workout yet. Your progress is still here, so you can retry.')
     } finally {
@@ -542,7 +622,14 @@ export default function WorkoutPage() {
   const completedCount = Object.values(completedSets).filter(Boolean).length
   const totalSets = workoutSession?.exercises.reduce((s, e) => s + e.sets, 0) ?? 0
   const progress = totalSets > 0 ? completedCount / totalSets : 0
-  const readyForGeneration = status === 'authenticated' && draftReady && !dashboardLoading
+  const elapsedTimer = getElapsedWorkoutSeconds(timer, timerRunning, timerStartedAtMs)
+  const readyForGeneration =
+    status === 'authenticated' &&
+    draftReady &&
+    !dashboardLoading &&
+    !error &&
+    Boolean(dashboard?.user) &&
+    Boolean(dashboard?.readiness)
 
   return (
     <AppShell>
@@ -586,8 +673,15 @@ export default function WorkoutPage() {
       </section>
 
       {error && (
-        <div className="mx-4 mb-4 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] text-[#B91C1C]">
-          {error}
+        <div className="mx-4 mb-4 flex items-center justify-between gap-3 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] px-4 py-3 text-[13px] text-[#B91C1C]">
+          <span>{error}</span>
+          <button
+            type="button"
+            onClick={clearDashboard}
+            className="shrink-0 rounded-lg border border-[#FCA5A5] px-3 py-1 text-[11px] font-semibold text-[#991B1B] transition-colors hover:bg-[#FEE2E2]"
+          >
+            Retry context
+          </button>
         </div>
       )}
 
@@ -661,7 +755,9 @@ export default function WorkoutPage() {
               {generating ? 'Building your personalised plan…' : `⚡ Generate ${ENVIRONMENTS.find(e => e.id === environment)?.label} Workout`}
             </Button>
             <p className="mt-3 text-[12px] text-[#8A8A85] text-center">
-              {readyForGeneration
+              {error
+                ? 'We could not load your readiness context yet. Retry and generate once your dashboard is back.'
+                : readyForGeneration
                 ? `Powered by Gemini AI · Adapted to readiness ${userProfile.readinessScore}/100`
                 : 'Loading your readiness, goal, and recovery context...'}
             </p>
@@ -691,7 +787,7 @@ export default function WorkoutPage() {
                 { v: workoutSession.exercises.length, l: 'Exercises' },
                 { v: `~${workoutSession.durationMins}`, l: 'Min' },
                 { v: `~${workoutSession.estimatedCalories}`, l: 'Kcal' },
-                { v: timerRunning ? formatTime(timer) : '00:00', l: timerRunning ? 'Elapsed' : 'Timer' },
+                { v: formatTime(elapsedTimer), l: elapsedTimer > 0 || timerRunning ? 'Elapsed' : 'Timer' },
               ].map(({ v, l }) => (
                 <div key={l} className="text-center">
                   <div className="font-display text-[20px] font-bold">{v}</div>
@@ -702,19 +798,19 @@ export default function WorkoutPage() {
 
             <div className="flex gap-2 mt-4">
               <button
-                onClick={() => setTimerRunning(t => !t)}
+                onClick={toggleTimer}
                 className="px-4 py-2 rounded-xl bg-white/15 text-white text-[12px] font-semibold hover:bg-white/25 transition-colors"
               >
-                {timerRunning ? '⏸ Pause' : '▶ Start timer'}
+                {timerRunning ? '⏸ Pause' : elapsedTimer > 0 ? '▶ Resume timer' : '▶ Start timer'}
               </button>
               <button
-                onClick={() => { setTimer(0); setTimerRunning(false) }}
+                onClick={resetTimerState}
                 className="px-3 py-2 rounded-xl bg-white/10 text-white text-[12px] hover:bg-white/20 transition-colors"
               >
                 Reset
               </button>
               <button
-                onClick={resetWorkout}
+                onClick={() => resetWorkout()}
                 className="ml-auto px-3 py-2 rounded-xl bg-white/10 text-white text-[12px] hover:bg-white/20 transition-colors"
               >
                 ↺ New plan
