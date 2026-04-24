@@ -133,3 +133,21 @@ export async function PATCH(req: NextRequest) {
   const { passwordHash: _passwordHash, googleId: _googleId, ...safeUser } = updatedUser
   return NextResponse.json({ user: safeUser })
 }
+
+export async function DELETE() {
+  const session = await getServerSession(authOptions)
+  if (!session?.user?.id) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { id: true },
+  })
+
+  if (!user) {
+    return NextResponse.json({ error: 'User not found' }, { status: 404 })
+  }
+
+  await prisma.user.delete({ where: { id: user.id } })
+
+  return NextResponse.json({ success: true })
+}

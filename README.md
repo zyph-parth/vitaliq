@@ -169,6 +169,7 @@ Important notes:
 - `NEXTAUTH_URL` and `NEXT_PUBLIC_APP_URL` must match the deployed URL exactly.
 - Use a pooled/runtime URL for `DATABASE_URL` in serverless environments.
 - Use a direct or session-pooled URL for `DIRECT_URL` so Prisma migrations can run safely.
+- Runtime API routes use `DATABASE_URL`. If a Supabase direct `db.*` host is unreachable from your local machine or deployment region, use the Supabase pooler URL for runtime traffic.
 - Upstash variables are required for production rate limiting.
 
 ### 4. Set up the database

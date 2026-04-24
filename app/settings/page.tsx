@@ -38,6 +38,8 @@ export default function SettingsPage() {
   const [saveMsg, setSaveMsg] = useState('')
   const [dataMsg, setDataMsg] = useState('')
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [exportingData, setExportingData] = useState(false)
+  const [deletingAccount, setDeletingAccount] = useState(false)
 
   // HIGH 7: Edit stats state
   const [showEditStats, setShowEditStats] = useState(false)
@@ -182,6 +184,65 @@ export default function SettingsPage() {
       setStatsMsg('Network error. Try again.')
     } finally {
       setStatsSaving(false)
+    }
+  }
+
+  const handleExportData = async () => {
+    setExportingData(true)
+    setDataMsg('')
+
+    try {
+      const res = await fetch('/api/user/export')
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok || !data) {
+        setDataMsg(data?.error || 'Could not export your data. Try again.')
+        return
+      }
+
+      const exportedAt = new Date().toISOString().slice(0, 10)
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `vitaliq-export-${exportedAt}.json`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+      setDataMsg('Data export ready.')
+    } catch {
+      setDataMsg('Could not export your data. Check your connection and try again.')
+    } finally {
+      setExportingData(false)
+      setTimeout(() => setDataMsg(''), 5000)
+    }
+  }
+
+  const handleDeleteAccount = async () => {
+    setDeletingAccount(true)
+    setDataMsg('')
+
+    try {
+      const res = await fetch('/api/user', { method: 'DELETE' })
+      const data = await res.json().catch(() => null)
+
+      if (!res.ok) {
+        setDataMsg(data?.error || 'Could not delete your account. Try again.')
+        setDeletingAccount(false)
+        return
+      }
+
+      clearDashboard()
+      try {
+        localStorage.removeItem('vitaliq-store')
+        localStorage.removeItem('vitaliq_units')
+      } catch { /* ignore */ }
+
+      await signOut({ callbackUrl: '/login' })
+    } catch {
+      setDataMsg('Could not delete your account. Check your connection and try again.')
+      setDeletingAccount(false)
     }
   }
 
@@ -425,15 +486,13 @@ export default function SettingsPage() {
       <div className="mx-4 mb-4">
         <Card padding="none">
           <button
-            onClick={() => {
-              setDataMsg('Data export is coming soon. Your data is securely stored in your private Supabase database.')
-              setTimeout(() => setDataMsg(''), 4000)
-            }}
+            onClick={() => void handleExportData()}
+            disabled={exportingData || deletingAccount}
             className="w-full flex items-center gap-3 p-4 text-left border-b border-[#F1F1EC] hover:bg-[#FAFAF7] transition-colors"
           >
             <span className="text-[18px]">📤</span>
             <div>
-              <div className="text-[14px] font-medium">Export my data</div>
+              <div className="text-[14px] font-medium">{exportingData ? 'Preparing export...' : 'Export my data'}</div>
               <div className="text-[11px] text-[#8A8A85] mt-0.5">Download all your health logs as JSON</div>
             </div>
           </button>
@@ -455,17 +514,15 @@ export default function SettingsPage() {
               <p className="text-[12px] text-[#DC4A3D]/70 mb-3">All health logs, streaks, and AI context will be permanently deleted.</p>
               <div className="flex gap-2">
                 <button
-                  onClick={() => {
-                    setShowDeleteConfirm(false)
-                    setDataMsg('Account deletion is not yet available. Please contact support at help@vitaliq.app')
-                    setTimeout(() => setDataMsg(''), 5000)
-                  }}
-                  className="flex-1 py-2 rounded-xl bg-[#DC4A3D] text-white text-[12px] font-semibold hover:bg-[#c73d31] transition-colors"
+                  onClick={() => void handleDeleteAccount()}
+                  disabled={deletingAccount}
+                  className="flex-1 py-2 rounded-xl bg-[#DC4A3D] text-white text-[12px] font-semibold hover:bg-[#c73d31] transition-colors disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  Yes, delete everything
+                  {deletingAccount ? 'Deleting...' : 'Yes, delete everything'}
                 </button>
                 <button
                   onClick={() => setShowDeleteConfirm(false)}
+                  disabled={deletingAccount}
                   className="flex-1 py-2 rounded-xl bg-white border border-[#E8E8E3] text-[12px] font-semibold hover:bg-[#F1F1EC] transition-colors"
                 >
                   Cancel
@@ -481,6 +538,9 @@ export default function SettingsPage() {
 
       {/* Sign out */}
       <div className="mx-4 mb-8">
+        <div className="mb-4 rounded-2xl border border-[#FCD34D] bg-[#FFFBEB] px-4 py-3 text-[12px] leading-6 text-[#92400E]">
+          VitalIQ provides general wellness guidance and AI-assisted estimates. It is not medical advice, diagnosis, or treatment. For urgent symptoms or medical decisions, contact a qualified clinician.
+        </div>
         <button
           onClick={() => signOut({ callbackUrl: '/login' })}
           className="w-full py-3.5 rounded-2xl border border-[#E8E8E3] text-[14px] font-semibold text-[#8A8A85] hover:border-[#DC4A3D] hover:text-[#DC4A3D] transition-all"
