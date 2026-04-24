@@ -46,6 +46,7 @@ model User {
   sleepLogs     SleepLog[]
   moodLogs      MoodLog[]
   biomarkers    Biomarker[]
+  hydrationLogs HydrationLog[]
   insights      Insight[]
   badges        UserBadge[]
   streak        Streak?
@@ -189,6 +190,20 @@ model MoodLog {
 
   @@map("mood_logs")
   @@index([userId, loggedAt])
+}
+
+model HydrationLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  localDate String
+  timeZone  String   @default("UTC")
+  glasses   Int      @default(0)
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, localDate])
+  @@map("hydration_logs")
+  @@index([userId, updatedAt])
 }
 
 // ─── BIOMARKERS (Longevity Pillar) ───────────────────────────────────────────

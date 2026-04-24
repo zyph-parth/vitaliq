@@ -243,6 +243,7 @@ export default function ProgressPage() {
       if (res.ok) {
         setBiomarkerMsg(`${entries.length} biomarker${entries.length > 1 ? 's' : ''} saved ✓`)
         setBiomarkerValues({})
+        clearDashboard()
         setTimeout(() => { setShowBiomarkerForm(false); setBiomarkerMsg('') }, 2000)
       } else {
         const err = await res.json().catch(() => ({}))

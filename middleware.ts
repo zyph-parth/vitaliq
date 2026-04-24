@@ -59,6 +59,7 @@ export const config = {
     '/api/sleep/:path*',
     '/api/mood/:path*',
     '/api/weight/:path*',
+    '/api/hydration/:path*',
     '/api/biomarkers/:path*',
     '/api/gemini/:path*',
     '/api/user/:path*',

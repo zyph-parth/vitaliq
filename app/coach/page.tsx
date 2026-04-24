@@ -9,6 +9,7 @@ import CoachMessageBody from '@/components/chat/CoachMessageBody'
 import { Chip, LoadingDots } from '@/components/ui'
 import { useStore } from '@/lib/store'
 import { useDashboard } from '@/lib/useDashboard'
+import { getLocalDateKey, withTimeZone } from '@/lib/client-time'
 
 interface Message {
   id: string
@@ -227,6 +228,7 @@ export default function CoachPage() {
   const { data: session, status } = useSession()
   const { dashboard, error } = useDashboard()
   const glassesToday = useStore((s) => s.glassesToday)
+  const setGlassesToday = useStore((s) => s.setGlassesToday)
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -267,6 +269,25 @@ export default function CoachPage() {
       setThreadReady(true)
     }
   }, [status, threadStorageKey])
+
+  useEffect(() => {
+    if (status !== 'authenticated') return
+
+    let cancelled = false
+
+    fetch(withTimeZone(`/api/hydration?localDate=${encodeURIComponent(getLocalDateKey())}`))
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (!cancelled && typeof data?.glasses === 'number') {
+          setGlassesToday(data.glasses)
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [setGlassesToday, status])
 
   useEffect(() => {
     if (!dashboard) return

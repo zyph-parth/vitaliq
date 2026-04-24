@@ -126,5 +126,33 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: 'Weight log not found or access denied' }, { status: 404 })
   }
 
+  const user = await prisma.user.findUnique({ where: { id: userId } })
+  const latestWeight = await prisma.weightLog.findFirst({
+    where: { userId },
+    orderBy: { date: 'desc' },
+  })
+
+  if (user && latestWeight && hasCompleteHealthProfile(user)) {
+    const metrics = computeAllMetrics(
+      latestWeight.weightKg,
+      user.heightCm,
+      user.age,
+      user.sex as Sex,
+      user.activityLevel as ActivityLevel,
+      user.goal as Goal
+    )
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        weightKg: latestWeight.weightKg,
+        bmi: metrics.bmi,
+        bmr: metrics.bmr,
+        tdee: metrics.tdee,
+        bodyFatPct: latestWeight.bodyFatPct ?? metrics.estimatedBodyFat,
+      },
+    })
+  }
+
   return NextResponse.json({ success: true })
 }

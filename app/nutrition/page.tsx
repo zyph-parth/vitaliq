@@ -108,16 +108,39 @@ export default function NutritionPage() {
   // Persist hydration glasses per-day to localStorage
   const todayKey = `vitaliq_hydration_${getLocalDateKey()}`
   useEffect(() => {
+    if (status !== 'authenticated') return
+
+    let cancelled = false
+
     try {
       const saved = localStorage.getItem(todayKey)
       const parsed = saved ? parseInt(saved, 10) : 0
       setGlassesToday(Number.isFinite(parsed) ? parsed : 0)
     } catch { /* ignore */ }
-  }, [setGlassesToday, todayKey])
+
+    fetch(withTimeZone(`/api/hydration?localDate=${encodeURIComponent(getLocalDateKey())}`))
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        if (cancelled || typeof data?.glasses !== 'number') return
+        setGlassesToday(data.glasses)
+        try { localStorage.setItem(todayKey, String(data.glasses)) } catch { /* ignore */ }
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [setGlassesToday, status, todayKey])
+
   const setGlassesAndSave = (n: number) => {
     const val = Math.max(0, Math.min(12, n))
     setGlassesToday(val)
     try { localStorage.setItem(todayKey, String(val)) } catch { /* ignore */ }
+    void fetch(withTimeZone('/api/hydration'), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ localDate: getLocalDateKey(), glasses: val }),
+    }).catch(() => {})
   }
 
   useEffect(() => {

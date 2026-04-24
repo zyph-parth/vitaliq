@@ -186,7 +186,7 @@ All AI calls are server-side through `/api/gemini`; the browser never receives y
 { "status": "ok", "timestamp": "..." }
 ```
 
-It does not verify database or Gemini connectivity.
+Use `/api/health?deep=1` for a readiness check. It verifies database connectivity and required production service configuration for auth, Gemini, and Upstash.
 
 ## Deployment
 
